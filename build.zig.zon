@@ -1,0 +1,18 @@
+.{
+    .name = "boxzer",
+    .version = "0.0.0",
+    .dependencies = .{
+        .eggzon = .{
+            .path = "../eggzon",
+            //.url = "https://github.com/ziglibs/eggzon/archive/refs/heads/master.tar.gz",
+            //.hash = "1220cd5cec7e9d4911074a9b2dec2dabef76e1adf94d041bca068163ce7666c4be47",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "src/main.zig",
+    },
+}
