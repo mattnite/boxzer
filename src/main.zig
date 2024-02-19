@@ -81,9 +81,6 @@ pub fn main() !void {
     const root_manifest = manifests.get(root_path).?;
     while (d > -1) : (d -= 1) {
         for (depths.keys(), depths.values()) |path, depth| {
-            if (std.mem.eql(u8, root_path, path))
-                continue;
-
             if (d == depth) {
                 const local_deps = dependencies.get(path).?;
                 var manifest = manifests.get(path).?;
@@ -120,9 +117,6 @@ pub fn main() !void {
     defer out_dir.close();
 
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        if (std.mem.eql(u8, root_path, path))
-            continue;
-
         const file = if (std.mem.eql(u8, path, root_path)) blk: {
             const out_path = try std.fmt.allocPrint(allocator, "{s}-{}.tar.gz", .{ manifest.name, manifest.version });
             break :blk try out_dir.createFile(out_path, .{});
