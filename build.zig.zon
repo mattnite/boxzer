@@ -3,9 +3,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .eggzon = .{
-            .path = "../eggzon",
-            //.url = "https://github.com/ziglibs/eggzon/archive/refs/heads/master.tar.gz",
-            //.hash = "1220cd5cec7e9d4911074a9b2dec2dabef76e1adf94d041bca068163ce7666c4be47",
+            .url = "https://github.com/mattnite/eggzon/archive/8b3ecf9664d2a74d703a45b5162901bb9fa45727.tar.gz",
+            .hash = "1220b22d0a9ac853ca8b40e51e44ca1868d5592d982bb4d6b5498ab0027ed5bc4ee5",
         },
     },
 
