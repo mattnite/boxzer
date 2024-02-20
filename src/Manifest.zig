@@ -203,7 +203,7 @@ pub fn serialize(manifest: Manifest, allocator: Allocator) ![]const u8 {
     , .{ manifest.name, manifest.version });
     for (manifest.paths.keys()) |path|
         try writer.print(
-            \\        "{s}"
+            \\        "{s}",
             \\
         , .{path});
     try writer.writeAll(
