@@ -12,6 +12,6 @@
         "build.zig",
         "build.zig.zon",
         "LICENSE",
-        "src/main.zig",
+        "src",
     },
 }
