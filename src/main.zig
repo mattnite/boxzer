@@ -74,7 +74,7 @@ pub fn main() !void {
     }
 
     var archives = std.StringArrayHashMap(Archive).init(allocator);
-    var hashes = std.StringArrayHashMap([Archive.Hash.digest_length]u8).init(allocator);
+    var hashes = std.StringArrayHashMap(Archive.MultiHashHexDigest).init(allocator);
     var urls = std.StringArrayHashMap([]const u8).init(allocator);
 
     var d: isize = @intCast(std.mem.max(u32, depths.values()));
@@ -88,7 +88,7 @@ pub fn main() !void {
                     try manifest.dependencies.put(dep_name, .{
                         .remote = .{
                             .url = urls.get(dep_path).?,
-                            .hash = try std.fmt.allocPrint(allocator, "{}", .{std.fmt.fmtSliceHexLower(&hashes.get(dep_path).?)}),
+                            .hash = try std.fmt.allocPrint(allocator, "{s}", .{&hashes.get(dep_path).?}),
                         },
                     });
                 }

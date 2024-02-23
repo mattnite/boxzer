@@ -320,12 +320,57 @@ fn is_executable(mode: std.fs.File.Mode, executable_bit: WhatToDoWithExecutableB
     }
 }
 
+pub const multihash_function: MultihashFunction = switch (Hash) {
+    std.crypto.hash.sha2.Sha256 => .@"sha2-256",
+    else => @compileError("unreachable"),
+};
+
+pub const Digest = [Hash.digest_length]u8;
+pub const multihash_len = 1 + 1 + Hash.digest_length;
+pub const multihash_hex_digest_len = 2 * multihash_len;
+pub const MultiHashHexDigest = [multihash_hex_digest_len]u8;
+const hex_charset = "0123456789abcdef";
+
+pub const MultihashFunction = enum(u16) {
+    identity = 0x00,
+    sha1 = 0x11,
+    @"sha2-256" = 0x12,
+    @"sha2-512" = 0x13,
+    @"sha3-512" = 0x14,
+    @"sha3-384" = 0x15,
+    @"sha3-256" = 0x16,
+    @"sha3-224" = 0x17,
+    @"sha2-384" = 0x20,
+    @"sha2-256-trunc254-padded" = 0x1012,
+    @"sha2-224" = 0x1013,
+    @"sha2-512-224" = 0x1014,
+    @"sha2-512-256" = 0x1015,
+    @"blake2b-256" = 0xb220,
+    _,
+};
+
+pub fn hex_digest(digest: Digest) MultiHashHexDigest {
+    var result: MultiHashHexDigest = undefined;
+
+    result[0] = hex_charset[@intFromEnum(multihash_function) >> 4];
+    result[1] = hex_charset[@intFromEnum(multihash_function) & 15];
+
+    result[2] = hex_charset[Hash.digest_length >> 4];
+    result[3] = hex_charset[Hash.digest_length & 15];
+
+    for (digest, 0..) |byte, i| {
+        result[4 + i * 2] = hex_charset[byte >> 4];
+        result[5 + i * 2] = hex_charset[byte & 15];
+    }
+    return result;
+}
+
 // TODO: threadpool this
 pub fn hash(
     archive: Archive,
     allocator: Allocator,
     executable_bit: WhatToDoWithExecutableBit,
-) ![Hash.digest_length]u8 {
+) !MultiHashHexDigest {
     var timer = try std.time.Timer.start();
     defer {
         const timer_result = timer.read();
@@ -355,5 +400,5 @@ pub fn hash(
     for (hashes.items) |file_hash|
         hasher.update(&file_hash);
 
-    return hasher.finalResult();
+    return hex_digest(hasher.finalResult());
 }
