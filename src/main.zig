@@ -1,4 +1,6 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
 const Manifest = @import("Manifest.zig");
 const Archive = @import("Archive.zig");
@@ -33,7 +35,7 @@ pub fn main() !void {
         const zon_text = try root_dir.readFileAlloc(allocator, "build.zig.zon", 0x4000);
         const manifest = try Manifest.from_text(allocator, zon_text);
         try manifests.putNoClobber(root_path, manifest);
-        std.log.info("created manifest: {s}", .{root_path});
+        std.log.debug("created manifest: {s}", .{root_path});
 
         const result = try dependencies.getOrPut(root_path);
         std.debug.assert(!result.found_existing);
@@ -52,33 +54,41 @@ pub fn main() !void {
     }
 
     const root_path = try std.fs.cwd().realpathAlloc(allocator, ".");
-    var depths = std.StringArrayHashMap(u32).init(allocator);
-    for (manifests.keys()) |path|
-        try depths.put(path, 0);
+    var stack = try circular_dependency_found(allocator, root_path, dependencies);
+    defer stack.deinit();
 
-    // calculate the depths of all the packages
-    {
-        var changes_made = true;
-        while (changes_made) {
-            changes_made = false;
-            for (depths.keys(), depths.values()) |path, depth| {
-                for (dependencies.get(path).?.values()) |dep_path| {
-                    const dep_depth = depths.get(dep_path).?;
-                    if (dep_depth <= depth) {
-                        try depths.put(dep_path, depth + 1);
-                        changes_made = true;
-                    }
-                }
-            }
-        }
+    if (stack.items.len > 0) {
+        std.log.err("Circular dependency found!", .{});
+        std.log.err("  {s}", .{stack.items[0]});
+        for (stack.items[1..]) |elem|
+            std.log.err("  -> {s}", .{elem});
+
+        return error.CircularDependency;
+    }
+
+    const depths = try calculate_depths(allocator, manifests.keys(), dependencies);
+    for (depths.keys(), depths.values()) |path, depth| {
+        std.log.info("{}: {s}", .{ depth, path });
     }
 
     var archives = std.StringArrayHashMap(Archive).init(allocator);
     var hashes = std.StringArrayHashMap(Archive.MultiHashHexDigest).init(allocator);
     var urls = std.StringArrayHashMap([]const u8).init(allocator);
 
-    var d: isize = @intCast(std.mem.max(u32, depths.values()));
     const root_manifest = manifests.get(root_path).?;
+    // calculate urls
+    for (manifests.keys(), manifests.values()) |path, manifest| {
+        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{s}-{}/{s}-{}.tar.gz", .{
+            base_url,
+            root_manifest.name,
+            root_manifest.version,
+            manifest.name,
+            manifest.version,
+        }));
+    }
+
+    const minimum_zig_version: []const u8 = try get_minimum_zig_version(allocator);
+    var d: isize = @intCast(std.mem.max(u32, depths.values()));
     while (d > -1) : (d -= 1) {
         for (depths.keys(), depths.values()) |path, depth| {
             if (d == depth) {
@@ -97,17 +107,14 @@ pub fn main() !void {
                 defer dir.close();
 
                 var archive = try Archive.read_from_fs(allocator, dir, manifest.paths);
-                if (archive.files.getPtr("build.zig.zon")) |file|
-                    file.text = try manifest.serialize(allocator);
+                if (archive.files.getPtr("build.zig.zon")) |file| {
+                    file.text = try manifest.serialize(allocator, .{
+                        .minimum_zig_version = minimum_zig_version,
+                    });
+                    std.log.info("generated manifest: {s}", .{file.text});
+                }
                 try hashes.put(path, try archive.hash(allocator, .ignore_executable_bit));
                 try archives.put(path, archive);
-                try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{s}-{}/{s}-{}.tar.gz", .{
-                    base_url,
-                    root_manifest.name,
-                    root_manifest.version,
-                    manifest.name,
-                    manifest.version,
-                }));
             }
         }
     }
@@ -141,7 +148,126 @@ pub fn main() !void {
         var buffered = std.io.bufferedWriter(file.writer());
         try buffered.writer().writeAll(tar_gz);
         try buffered.flush();
-
-        std.log.info("{s}: {}", .{ path, manifest });
     }
+}
+
+const ZigEnv = struct {
+    version: []const u8,
+};
+
+fn get_minimum_zig_version(allocator: Allocator) ![]u8 {
+    const result = try std.ChildProcess.run(.{
+        .allocator = allocator,
+        .argv = &.{ "zig", "env" },
+    });
+    defer {
+        allocator.free(result.stdout);
+        allocator.free(result.stderr);
+    }
+
+    if (result.term != .Exited and result.term.Exited != 0)
+        return error.FailedToGetZigVersion;
+
+    var env = try std.json.parseFromSlice(ZigEnv, allocator, result.stdout, .{
+        .ignore_unknown_fields = true,
+    });
+    defer env.deinit();
+
+    return allocator.dupe(u8, env.value.version);
+}
+
+fn calculate_depths(
+    allocator: Allocator,
+    paths: []const []const u8,
+    dependencies: std.StringArrayHashMap(std.StringArrayHashMapUnmanaged([]const u8)),
+) !std.StringArrayHashMap(u32) {
+    var dependents = std.StringArrayHashMap(std.StringArrayHashMapUnmanaged(void)).init(allocator);
+    defer {
+        //for (dependents.values()) |*d| d.deinit();
+        dependents.deinit();
+    }
+
+    for (paths) |path| if (dependencies.get(path)) |deps| {
+        for (deps.values()) |dep_path| {
+            const result = try dependents.getOrPut(dep_path);
+            if (result.found_existing == false)
+                result.value_ptr.* = .{};
+
+            try result.value_ptr.put(allocator, path, {});
+        }
+    };
+
+    for (dependents.keys(), dependents.values()) |path, parents| {
+        std.log.info("{s} is depended on by {}", .{ path, parents.count() });
+    }
+
+    var depths = std.StringArrayHashMap(u32).init(allocator);
+    errdefer depths.deinit();
+
+    for (paths) |path|
+        try calculate_depths_recursive(path, &depths, dependents);
+
+    return depths;
+}
+
+// walk up the dependency tree and calculate depths of each node
+fn calculate_depths_recursive(
+    path: []const u8,
+    depths: *std.StringArrayHashMap(u32),
+    dependents: std.StringArrayHashMap(std.StringArrayHashMapUnmanaged(void)),
+) !void {
+    // if the depth for a path is found, then we've already calculated it
+    if (depths.contains(path))
+        return;
+
+    const parents = dependents.get(path) orelse {
+        // we've found the root path
+        try depths.put(path, 0);
+        return;
+    };
+
+    var max_depth: u32 = 0;
+    for (parents.keys()) |parent_path| {
+        try calculate_depths_recursive(parent_path, depths, dependents);
+        max_depth = @max(max_depth, depths.get(parent_path).?);
+    }
+
+    try depths.put(path, max_depth + 1);
+}
+
+fn circular_dependency_found(
+    allocator: Allocator,
+    root_path: []const u8,
+    dependencies: std.StringArrayHashMap(std.StringArrayHashMapUnmanaged([]const u8)),
+) !std.ArrayList([]const u8) {
+    var stack = std.ArrayList([]const u8).init(allocator);
+    errdefer stack.deinit();
+
+    _ = try circular_dependency_found_recursive(root_path, &stack, dependencies);
+
+    return stack;
+}
+
+fn circular_dependency_found_recursive(
+    path: []const u8,
+    stack: *std.ArrayList([]const u8),
+    dependencies: std.StringArrayHashMap(std.StringArrayHashMapUnmanaged([]const u8)),
+) !bool {
+    for (stack.items) |elem| {
+        if (std.mem.eql(u8, path, elem)) {
+            try stack.append(path);
+            return true;
+        }
+    }
+
+    try stack.append(path);
+
+    if (dependencies.get(path)) |deps|
+        for (deps.values()) |dep_path| {
+            if (try circular_dependency_found_recursive(dep_path, stack, dependencies))
+                return true;
+        };
+
+    _ = stack.pop();
+    return false;
 }

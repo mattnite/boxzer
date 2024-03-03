@@ -3,6 +3,7 @@ name: []const u8,
 version: std.SemanticVersion,
 dependencies: std.StringArrayHashMap(PackageInfo),
 paths: std.StringArrayHashMap(void),
+doc: zon.Document,
 
 const Manifest = @This();
 const std = @import("std");
@@ -37,13 +38,13 @@ pub const PackageInfo = union(enum) {
 };
 
 pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
-    var result = try zon.parseString(allocator, text);
-    defer result.deinit();
+    var doc = try zon.parseString(allocator, text);
+    errdefer doc.deinit();
 
-    if (result.root != .object)
+    if (doc.root != .object)
         return error.RootIsNotObject;
 
-    const root = result.root.object;
+    const root = doc.root.object;
     const name = root.get("name") orelse return error.ProjectMissingName;
     if (name != .string)
         return error.ProjectNameNotString;
@@ -145,6 +146,7 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
         .version = semver,
         .dependencies = dependencies,
         .paths = paths,
+        .doc = doc,
     };
 }
 
@@ -165,78 +167,66 @@ pub fn deinit(manifest: *Manifest) void {
 
     for (manifest.paths.keys()) |path| manifest.allocator.free(path);
     manifest.paths.deinit();
+    manifest.doc.deinit();
 }
 
-pub fn format(
-    manifest: Manifest,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
-    _ = options;
+pub const SerializeOptions = struct {
+    minimum_zig_version: ?[]const u8,
+};
 
-    try writer.writeByte('\n');
-    try writer.print("\tname: {s}\n", .{manifest.name});
-    try writer.print("\tversion: {}\n", .{manifest.version});
-    try writer.writeAll("\tpaths:\n");
-    for (manifest.paths.keys()) |path|
-        try writer.print("\t\t{s}\n", .{path});
-
-    if (manifest.dependencies.count() > 0) {
-        try writer.writeAll("\tdependencies:\n");
-        for (manifest.dependencies.keys(), manifest.dependencies.values()) |dep_name, dep|
-            try writer.print("\t\t{s}: {}\n", .{ dep_name, dep });
-    }
-}
-
-pub fn serialize(manifest: Manifest, allocator: Allocator) ![]const u8 {
+pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptions) ![]const u8 {
     var buffer = std.ArrayList(u8).init(allocator);
     const writer = buffer.writer();
 
-    try writer.writeAll(".{\n");
-    try writer.print(
-        \\    .name = "{s}",
-        \\    .version = "{}",
-        \\    .paths = .{{
-        \\
-    , .{ manifest.name, manifest.version });
-    for (manifest.paths.keys()) |path|
-        try writer.print(
-            \\        "{s}",
-            \\
-        , .{path});
-    try writer.writeAll(
-        \\    },
-        \\
-    );
+    if (!manifest.doc.root.object.contains("minimum_zig_version") and opts.minimum_zig_version != null) {
+        try manifest.doc.root.object.put(manifest.allocator, "minimum_zig_version", .{
+            .string = opts.minimum_zig_version.?,
+        });
+    }
 
     if (manifest.dependencies.count() > 0) {
-        try writer.writeAll(
-            \\    .dependencies = .{
-            \\
-        );
-
+        const dependencies = manifest.doc.root.object.getPtr("dependencies").?;
         for (manifest.dependencies.keys(), manifest.dependencies.values()) |dep_name, info| {
-            try writer.print(
-                \\        .{s} = .{{
-                \\            .url = "{s}",
-                \\            .hash = "{s}",
-                \\        }},
-                \\
-            , .{
-                std.zig.fmtId(dep_name),
-                info.remote.url,
-                info.remote.hash,
-            });
+            // TODO: clean up old
+            var new_value = std.StringArrayHashMapUnmanaged(zon.Node){};
+            try new_value.put(manifest.allocator, "url", .{ .string = info.remote.url });
+            try new_value.put(manifest.allocator, "hash", .{ .string = info.remote.hash });
+            try dependencies.object.put(manifest.allocator, dep_name, .{ .object = new_value });
         }
-
-        try writer.writeAll(
-            \\    },
-            \\
-        );
     }
-    try writer.writeAll("}\n");
 
+    try write_zon_node(manifest.doc.root, 0, writer);
     return try buffer.toOwnedSlice();
+}
+
+const WriteZonError = error{OutOfMemory};
+fn write_zon_node(node: zon.Node, depth: u32, writer: anytype) WriteZonError!void {
+    switch (node) {
+        .null => try writer.writeAll("null"),
+        .empty => {},
+        .@"enum" => |e| try writer.print("\"{s}\"", .{e}),
+        .string => |str| try writer.print("\"{s}\"", .{str}),
+        .array => |arr| {
+            try writer.writeAll(".{\n");
+            for (arr) |elem| {
+                try writer.writeByteNTimes(' ', 4 * (depth + 1));
+                try write_zon_node(elem, depth + 1, writer);
+                try writer.writeAll(",\n");
+            }
+            try writer.writeByteNTimes(' ', 4 * depth);
+            try writer.writeAll("}");
+        },
+        .object => |obj| {
+            try writer.writeAll(".{\n");
+            for (obj.keys(), obj.values()) |key, value| {
+                try writer.writeByteNTimes(' ', 4 * (depth + 1));
+                try writer.print(".{} = ", .{std.zig.fmtId(key)});
+                try write_zon_node(value, depth + 1, writer);
+                try writer.writeAll(",\n");
+            }
+            try writer.writeByteNTimes(' ', 4 * depth);
+            try writer.writeAll("}");
+        },
+        inline else => |value| try writer.print("{}", .{value}),
+    }
 }
