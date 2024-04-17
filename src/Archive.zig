@@ -303,23 +303,6 @@ pub const WhatToDoWithExecutableBit = enum {
     include_executable_bit,
 };
 
-fn is_executable(mode: std.fs.File.Mode, executable_bit: WhatToDoWithExecutableBit) bool {
-    switch (executable_bit) {
-        .ignore_executable_bit => return false,
-        .include_executable_bit => {},
-    }
-
-    if (builtin.os.tag == .windows) {
-        // TODO check the ACL on Windows.
-        // Until this is implemented, this could be a false negative on
-        // Windows, which is why we do not yet set executable_bit_only above
-        // when unpacking the tarball.
-        return false;
-    } else {
-        return (mode & std.os.S.IXUSR) != 0;
-    }
-}
-
 pub const multihash_function: MultihashFunction = switch (Hash) {
     std.crypto.hash.sha2.Sha256 => .@"sha2-256",
     else => @compileError("unreachable"),
@@ -369,7 +352,6 @@ pub fn hex_digest(digest: Digest) MultiHashHexDigest {
 pub fn hash(
     archive: Archive,
     allocator: Allocator,
-    executable_bit: WhatToDoWithExecutableBit,
 ) !MultiHashHexDigest {
     var timer = try std.time.Timer.start();
     defer {
@@ -391,7 +373,8 @@ pub fn hash(
         const file = archive.files.get(path).?;
         var hasher = Hash.init(.{});
         hasher.update(path);
-        hasher.update(&.{ 0, @intFromBool(is_executable(file.mode, executable_bit)) });
+        // hardcode executable bit to false
+        hasher.update(&.{ 0, @intFromBool(false) });
         hasher.update(file.text);
         hasher.final(result);
     }

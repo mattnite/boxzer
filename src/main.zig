@@ -45,7 +45,12 @@ pub fn main() !void {
         for (manifest.dependencies.keys(), manifest.dependencies.values()) |dep_name, dep|
             switch (dep) {
                 .local => |local| {
-                    const realpath = try root_dir.realpathAlloc(allocator, local.path);
+                    const realpath = root_dir.realpathAlloc(allocator, local.path) catch |err| {
+                        if (err == error.FileNotFound)
+                            std.log.err("failed to find file: {s}", .{local.path});
+
+                        return err;
+                    };
                     try todo.put(realpath, {});
                     try result.value_ptr.put(allocator, dep_name, realpath);
                 },
@@ -113,7 +118,7 @@ pub fn main() !void {
                     });
                     std.log.info("generated manifest: {s}", .{file.text});
                 }
-                try hashes.put(path, try archive.hash(allocator, .ignore_executable_bit));
+                try hashes.put(path, try archive.hash(allocator));
                 try archives.put(path, archive);
             }
         }
