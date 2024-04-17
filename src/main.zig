@@ -15,6 +15,13 @@ pub fn main() !void {
     const allocator = arena.allocator();
     const args = try std.process.argsAlloc(allocator);
 
+    if (std.mem.eql(u8, args[1], "get-version")) {
+        const zon_text = try std.fs.cwd().readFileAlloc(allocator, "build.zig.zon", 0x4000);
+        const manifest = try Manifest.from_text(allocator, zon_text);
+        try std.io.getStdOut().writer().print("{}\n", .{manifest.version});
+        return;
+    }
+
     const base_url = args[1];
 
     var todo = std.StringArrayHashMap(void).init(allocator);
