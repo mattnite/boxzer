@@ -49,6 +49,7 @@ pub const Header = extern struct {
         path: []const u8,
         size: u64,
         mode: std.fs.File.Mode,
+        linkname: ?[]const u8 = null,
     };
 
     pub fn to_bytes(header: *const Header) *const [512]u8 {
@@ -67,6 +68,9 @@ pub const Header = extern struct {
         try ret.setMode(opts.typeflag, opts.mode);
         try ret.setUid(0);
         try ret.setGid(0);
+
+        if (opts.linkname) |linkname|
+            try ret.setLinkname(linkname);
 
         std.mem.copyForwards(u8, &ret.uname, "root");
         std.mem.copyForwards(u8, &ret.gname, "root");
@@ -90,6 +94,13 @@ pub const Header = extern struct {
         }
     }
 
+    pub fn setLinkname(self: *Self, linkname: []const u8) !void {
+        if (linkname.len > self.linkname.len)
+            return error.TooBig;
+
+        _ = try std.fmt.bufPrint(&self.linkname, "{s}", .{linkname});
+    }
+
     pub fn setSize(self: *Self, size: u64) !void {
         _ = try std.fmt.bufPrint(&self.size, "{o:0>11}", .{size});
     }
@@ -106,6 +117,7 @@ pub const Header = extern struct {
         switch (filetype) {
             .regular => _ = try std.fmt.bufPrint(&self.mode, "0{o:0>6}", .{perm}),
             .directory => _ = try std.fmt.bufPrint(&self.mode, "0{o:0>6}", .{perm}),
+            .symbolic_link => _ = try std.fmt.bufPrint(&self.mode, "0{o:0>6}", .{perm}),
             else => return error.Unsupported,
         }
     }
