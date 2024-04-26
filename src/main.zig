@@ -120,10 +120,10 @@ pub fn main() !void {
 
                 var archive = try Archive.read_from_fs(allocator, dir, manifest.paths);
                 if (archive.files.getPtr("build.zig.zon")) |file| {
-                    file.text = try manifest.serialize(allocator, .{
+                    file.kind = .{ .regular = try manifest.serialize(allocator, .{
                         .minimum_zig_version = minimum_zig_version,
-                    });
-                    std.log.info("generated manifest: {s}", .{file.text});
+                    }) };
+                    std.log.info("generated manifest: {s}", .{file.kind.regular});
                 }
                 try hashes.put(path, try archive.hash(allocator));
                 try archives.put(path, archive);
@@ -155,8 +155,7 @@ pub fn main() !void {
         defer file.close();
 
         std.log.debug("archive path: {s}", .{path});
-        const name = try std.fmt.allocPrint(allocator, "{s}-{}", .{ manifest.name, manifest.version });
-        const tar_gz = try archives.get(path).?.to_tar_gz(allocator, name);
+        const tar_gz = try archives.get(path).?.to_tar_gz(allocator);
         var buffered = std.io.bufferedWriter(file.writer());
         try buffered.writer().writeAll(tar_gz);
         try buffered.flush();

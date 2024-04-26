@@ -13,13 +13,23 @@ const log = std.log.scoped(.archive);
 
 pub const File = struct {
     mode: std.fs.File.Mode,
-    text: []const u8,
+    kind: union(enum) {
+        regular: []const u8,
+        symlink: []const u8,
+    },
 };
 
 pub fn deinit(archive: *Archive, allocator: Allocator) void {
     for (archive.files.keys(), archive.files.values()) |path, file| {
         allocator.free(path);
-        allocator.free(file.text);
+        switch (file.kind) {
+            .regular => |text| {
+                allocator.free(text);
+            },
+            .symlink => |link_path| {
+                allocator.free(link_path);
+            },
+        }
     }
 
     archive.files.deinit(allocator);
@@ -213,32 +223,69 @@ pub fn read_from_fs(
                 if (entry.kind == .directory)
                     continue;
 
-                if (entry.kind != .file) {
-                    log.warn("skipping {}: {s}", .{ entry.kind, entry.path });
-                    continue;
+                switch (entry.kind) {
+                    .file => {
+                        var path_components = std.ArrayList([]const u8).init(allocator);
+                        defer path_components.deinit();
+
+                        try path_components.appendSlice(components.items);
+                        try path_components.append(entry.path);
+
+                        const path_copy = try std.fs.path.join(allocator, path_components.items);
+                        errdefer allocator.free(path_copy);
+
+                        const file = try entry.dir.openFile(entry.basename, .{});
+                        defer file.close();
+
+                        const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+                        errdefer allocator.free(text);
+
+                        std.log.debug("adding file: {s}", .{entry.path});
+                        const file_stat = try file.stat();
+                        try archive.files.put(allocator, path_copy, .{
+                            .mode = file_stat.mode,
+                            .kind = .{
+                                .regular = text,
+                            },
+                        });
+                    },
+                    .sym_link => {
+                        var path_components = std.ArrayList([]const u8).init(allocator);
+                        defer path_components.deinit();
+
+                        try path_components.appendSlice(components.items);
+                        try path_components.append(entry.path);
+
+                        const path_copy = try std.fs.path.join(allocator, path_components.items);
+                        errdefer allocator.free(path_copy);
+
+                        var buf: [8000]u8 = undefined;
+                        const link_name = try entry.dir.readLink(entry.basename, &buf);
+                        const link_copy = try allocator.dupe(u8, link_name);
+
+                        const file = try entry.dir.openFile(entry.basename, .{});
+                        defer file.close();
+
+                        const file_stat = try file.stat();
+                        std.log.debug("adding symlink: {s} -> {s}", .{
+                            path_copy,
+                            link_copy,
+                        });
+
+                        try archive.files.put(allocator, path_copy, .{
+                            .mode = file_stat.mode,
+                            .kind = .{
+                                .symlink = link_copy,
+                            },
+                        });
+                    },
+                    else => {
+                        if (entry.kind != .file) {
+                            log.warn("skipping {}: {s}", .{ entry.kind, entry.path });
+                            continue;
+                        }
+                    },
                 }
-
-                var path_components = std.ArrayList([]const u8).init(allocator);
-                defer path_components.deinit();
-
-                try path_components.appendSlice(components.items);
-                try path_components.append(entry.path);
-
-                const path_copy = try std.fs.path.join(allocator, path_components.items);
-                errdefer allocator.free(path_copy);
-
-                const file = try entry.dir.openFile(entry.basename, .{});
-                defer file.close();
-
-                const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-                errdefer allocator.free(text);
-
-                std.log.debug("adding file: {s}", .{entry.path});
-                const file_stat = try file.stat();
-                try archive.files.put(allocator, path_copy, .{
-                    .text = text,
-                    .mode = file_stat.mode,
-                });
             }
         } else {
             const file = try subdir.openFile(components.items[components.items.len - 1], .{});
@@ -253,8 +300,10 @@ pub fn read_from_fs(
             const file_stat = try file.stat();
             std.log.debug("adding file directly: {s}", .{path_copy});
             try archive.files.put(allocator, path_copy, .{
-                .text = text,
                 .mode = file_stat.mode,
+                .kind = .{
+                    .regular = text,
+                },
             });
         }
     }
@@ -262,7 +311,7 @@ pub fn read_from_fs(
     return archive;
 }
 
-pub fn to_tar_gz(archive: Archive, allocator: Allocator, name: []const u8) ![]u8 {
+pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
     var in_buf = std.fifo.LinearFifo(u8, .{ .Dynamic = {} }).init(allocator);
     defer in_buf.deinit();
 
@@ -270,18 +319,33 @@ pub fn to_tar_gz(archive: Archive, allocator: Allocator, name: []const u8) ![]u8
     defer arena.deinit();
 
     for (archive.files.keys(), archive.files.values()) |path, file| {
-        const padding = padding_from_size(file.text.len);
-        const path_with_skipped_dir = try std.fs.path.join(arena.allocator(), &.{ name, path });
+        const size = switch (file.kind) {
+            .regular => |text| text.len,
+            .symlink => 0,
+        };
+        const padding = padding_from_size(size);
         const header = try tar.Header.init(.{
-            .path = path_with_skipped_dir,
-            .size = file.text.len,
-            .typeflag = .regular,
+            .path = path,
+            .size = size,
+            .typeflag = switch (file.kind) {
+                .regular => .regular,
+                .symlink => .symbolic_link,
+            },
             .mode = @intCast(file.mode),
+            .linkname = switch (file.kind) {
+                .regular => null,
+                .symlink => |link| link,
+            },
         });
 
         try in_buf.writer().writeAll(header.to_bytes());
-        try in_buf.writer().writeAll(file.text);
-        try in_buf.writer().writeByteNTimes(0, @as(usize, @intCast(padding)));
+        switch (file.kind) {
+            .regular => |text| {
+                try in_buf.writer().writeAll(text);
+                try in_buf.writer().writeByteNTimes(0, @as(usize, @intCast(padding)));
+            },
+            .symlink => {},
+        }
     }
 
     try in_buf.writer().writeByteNTimes(0, 1024);
@@ -372,16 +436,50 @@ pub fn hash(
     for (paths.items, hashes.items) |path, *result| {
         const file = archive.files.get(path).?;
         var hasher = Hash.init(.{});
+        std.log.debug("hashing file", .{});
+        std.log.debug("  <- {}", .{std.fmt.fmtSliceEscapeUpper(path)});
         hasher.update(path);
-        // hardcode executable bit to false
-        hasher.update(&.{ 0, @intFromBool(false) });
-        hasher.update(file.text);
+
+        switch (file.kind) {
+            .regular => |text| {
+                // hardcode executable bit to false
+                std.log.debug("  <- {}", .{std.fmt.fmtSliceEscapeUpper(&.{ 0, 0 })});
+                hasher.update(&.{ 0, 0 });
+                std.log.debug("  <- <content>", .{});
+                hasher.update(text);
+            },
+            .symlink => |symlink| {
+                const link_name = try normalize_path_alloc(allocator, symlink);
+                hasher.update(link_name);
+                std.log.err("  <- {}", .{std.fmt.fmtSliceEscapeUpper(link_name)});
+            },
+        }
         hasher.final(result);
+        std.log.debug("  -> {}", .{std.fmt.fmtSliceEscapeUpper(result)});
     }
 
+    std.log.debug("hashing package:", .{});
     var hasher = Hash.init(.{});
-    for (hashes.items) |file_hash|
+    for (paths.items, hashes.items) |file_path, file_hash| {
+        std.log.debug("  {s}: {}", .{ file_path, std.fmt.fmtSliceHexUpper(&file_hash) });
         hasher.update(&file_hash);
+    }
 
-    return hex_digest(hasher.finalResult());
+    const result = hex_digest(hasher.finalResult());
+    std.log.debug("  RESULT: {s}", .{result});
+    return result;
+}
+
+fn normalize_path_alloc(arena: Allocator, pkg_path: []const u8) ![]const u8 {
+    const normalized = try arena.dupe(u8, pkg_path);
+    if (std.fs.path.sep == canonical_sep) return normalized;
+    normalize_path(normalized);
+    return normalized;
+}
+
+const canonical_sep = std.fs.path.sep_posix;
+
+fn normalize_path(bytes: []u8) void {
+    assert(std.fs.path.sep != canonical_sep);
+    std.mem.replaceScalar(u8, bytes, std.fs.path.sep, canonical_sep);
 }
