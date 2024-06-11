@@ -167,7 +167,7 @@ const ZigEnv = struct {
 };
 
 fn get_minimum_zig_version(allocator: Allocator) ![]u8 {
-    const result = try std.ChildProcess.run(.{
+    const result = try std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ "zig", "env" },
     });

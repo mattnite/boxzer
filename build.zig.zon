@@ -3,8 +3,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .eggzon = .{
-            .url = "https://github.com/mattnite/eggzon/archive/6a5e6a26fb36c1dbf08b7454b2cd9146f6352b7e.tar.gz",
-            .hash = "1220157755bfeb39235dd57ec07f839296fc6924dee318d227e9a77d19c67fd33230",
+            .url = "https://github.com/mattnite/eggzon/archive/e85c42707b22bf015e6e3af2677012eb889a6f87.tar.gz",
+            .hash = "1220f817c9b09e14cb8aabc5c7236966a99c37de28f94026efcda416285efd612686",
         },
     },
 
