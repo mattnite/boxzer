@@ -2,7 +2,7 @@
     .name = "b",
     .version = "0.0.0",
     .dependencies = .{
-        .c = .{ .path = "../c" },
+        .c = .{ .path = "../c", .lazy = true },
     },
     .paths = .{
         "build.zig",

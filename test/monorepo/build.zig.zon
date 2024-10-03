@@ -2,8 +2,8 @@
     .name = "monorepo",
     .version = "0.0.0",
     .dependencies = .{
-        .b = .{ .path = "b" },
-        .c = .{ .path = "c" },
+        .b = .{ .path = "b", .lazy = true },
+        .c = .{ .path = "c", .lazy = true },
     },
     .paths = .{
         "build.zig.zon",

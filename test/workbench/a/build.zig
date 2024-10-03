@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const b_dep = b.dependency("b", .{});
+    const b_dep = b.lazyDependency("b", .{});
     const exe = b.addExecutable(.{
         .name = "a",
         .root_source_file = b.path("src/main.zig"),
