@@ -7,6 +7,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = b.host,
     });
-    exe.root_module.addImport("b", b_dep.module("b"));
+    exe.root_module.addImport("b", b_dep.?.module("b"));
     b.installArtifact(exe);
 }
