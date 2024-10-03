@@ -191,6 +191,7 @@ pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptio
             var new_value = std.StringArrayHashMapUnmanaged(zon.Node){};
             try new_value.put(manifest.allocator, "url", .{ .string = info.remote.url });
             try new_value.put(manifest.allocator, "hash", .{ .string = info.remote.hash });
+            try new_value.put(manifest.allocator, "lazy", .{ .bool = true });
             try dependencies.object.put(manifest.allocator, dep_name, .{ .object = new_value });
         }
     }
