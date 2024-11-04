@@ -191,13 +191,13 @@ pub fn read_from_fs(
                 }
             }
         } else {
-            const file = try subdir.openFile(components.items[components.items.len - 1], .{});
+            const file = try subdir.openFile(components[components.len - 1], .{});
             defer file.close();
 
             const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
             errdefer allocator.free(text);
 
-            const path_copy = try std.fs.path.join(allocator, components.items);
+            const path_copy = try std.fs.path.join(allocator, components);
             errdefer allocator.free(path_copy);
 
             const file_stat = try file.stat();
