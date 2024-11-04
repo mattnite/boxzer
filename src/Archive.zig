@@ -156,7 +156,7 @@ pub fn read_from_fs(
                         var path_components = std.ArrayList([]const u8).init(allocator);
                         defer path_components.deinit();
 
-                        try path_components.appendSlice(components.items);
+                        try path_components.appendSlice(components);
                         try path_components.append(entry.path);
 
                         const path_copy = try std.fs.path.join(allocator, path_components.items);
