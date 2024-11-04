@@ -32,6 +32,7 @@ jobs:
         run: zig build test
 
       - name: Dry run packaging
+        shell: bash
         run: |
           cd test/monorepo
           ../../zig-out/bin/boxzer http://localhost:8000
