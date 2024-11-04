@@ -96,11 +96,9 @@ pub fn read_from_fs(
             root_dir;
 
         const stat = dir.statFile(basename) catch |err| {
-            if (err == error.FileNotFound) {
-                var buf: [4096]u8 = undefined;
-                const dir_path = try dir.realpath(".", &buf);
-                std.log.err("File not found: {s}/{s}", .{ dir_path, path });
-            }
+            var buf: [4096]u8 = undefined;
+            const dir_path = try dir.realpath(".", &buf);
+            std.log.err("Failed to stat file: {s}/{s}, reason: {}", .{ dir_path, path, err });
 
             return err;
         };
