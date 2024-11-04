@@ -68,15 +68,17 @@ fn path_to_components(allocator: Allocator, path: []const u8) ![]const []const u
     return list.toOwnedSlice();
 }
 
+const Dir = std.fs.Dir;
+
 // TODO: thread pool it
 pub fn read_from_fs(
     allocator: Allocator,
-    dir: std.fs.Dir,
+    root_dir: Dir,
     paths: std.StringArrayHashMap(void),
 ) !Archive {
     {
         var buf: [4096]u8 = undefined;
-        const dir_path = try dir.realpath(".", &buf);
+        const dir_path = try root_dir.realpath(".", &buf);
         std.log.err("reading archive from: {s}", .{dir_path});
     }
 
@@ -87,33 +89,23 @@ pub fn read_from_fs(
         const components = try path_to_components(allocator, path);
         defer allocator.free(components);
 
-        var stack = std.ArrayList(std.fs.Dir).init(allocator);
-        defer {
-            for (stack.items, 0..) |*subdir, i| if (i != 0) subdir.close();
-            stack.deinit();
-        }
+        const basename = std.fs.path.basename(path);
+        const dir = if (std.fs.path.dirname(path)) |dirname|
+            try root_dir.openDir(dirname, .{})
+        else
+            root_dir;
 
-        for (components[0 .. components.len - 1], 0..) |component, i| {
-            const subdir = if (i == 0) dir else stack.items[stack.items.len - 1];
-            var new_dir = try subdir.openDir(component, .{ .iterate = true });
-            {
-                errdefer new_dir.close();
-                try stack.append(new_dir);
-            }
-        }
-
-        const subdir = if (stack.items.len == 0) dir else stack.items[stack.items.len - 1];
-        const stat = subdir.statFile(components[components.len - 1]) catch |err| {
+        const stat = dir.statFile(basename) catch |err| {
             if (err == error.FileNotFound) {
                 var buf: [4096]u8 = undefined;
-                const dir_path = try subdir.realpath(".", &buf);
+                const dir_path = try dir.realpath(".", &buf);
                 std.log.err("File not found: {s}/{s}", .{ dir_path, path });
             }
 
             return err;
         };
         if (stat.kind == .directory) {
-            var collected_dir = try subdir.openDir(components[components.len - 1], .{});
+            var collected_dir = try dir.openDir(basename, .{});
             defer collected_dir.close();
             {
                 var buf: [4096]u8 = undefined;
@@ -191,7 +183,7 @@ pub fn read_from_fs(
                 }
             }
         } else {
-            const file = try subdir.openFile(components[components.len - 1], .{});
+            const file = try dir.openFile(basename, .{});
             defer file.close();
 
             const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
