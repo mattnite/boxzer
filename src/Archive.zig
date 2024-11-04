@@ -95,14 +95,19 @@ pub fn read_from_fs(
         else
             root_dir;
 
-        const stat = dir.statFile(basename) catch |err| {
-            var buf: [4096]u8 = undefined;
-            const dir_path = try dir.realpath(".", &buf);
-            std.log.err("Failed to stat file: {s}/{s}, reason: {}", .{ dir_path, path, err });
+        const is_dir = blk: {
+            const stat = dir.statFile(basename) catch |err| {
+                if (err == error.IsDir)
+                    break :blk true;
+                var buf: [4096]u8 = undefined;
+                const dir_path = try dir.realpath(".", &buf);
+                std.log.err("Failed to stat file: {s}/{s}, reason: {}", .{ dir_path, path, err });
 
-            return err;
+                return err;
+            };
+            break :blk stat.kind == .directory;
         };
-        if (stat.kind == .directory) {
+        if (is_dir) {
             var collected_dir = try dir.openDir(basename, .{
                 .iterate = true,
             });
