@@ -105,7 +105,9 @@ pub fn read_from_fs(
             return err;
         };
         if (stat.kind == .directory) {
-            var collected_dir = try dir.openDir(basename, .{});
+            var collected_dir = try dir.openDir(basename, .{
+                .iterate = true,
+            });
             defer collected_dir.close();
             {
                 var buf: [4096]u8 = undefined;
