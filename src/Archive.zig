@@ -57,107 +57,16 @@ const ReadFromTarOptions = struct {
     strip_components: u32,
 };
 
-//pub fn read_from_tar(
-//    allocator: Allocator,
-//    reader: anytype,
-//    options: ReadFromTarOptions,
-//) !Archive {
-//    var timer = try std.time.Timer.start();
-//    defer {
-//        const result = timer.read();
-//        log.info("read_from_tar took {} nanoseconds", .{result});
-//    }
-//
-//    var archive = Archive{};
-//    errdefer archive.deinit(allocator);
-//
-//    var file_name_buffer: [255]u8 = undefined;
-//    var buffer: [512 * 8]u8 = undefined;
-//    var start: usize = 0;
-//    var end: usize = 0;
-//    header: while (true) {
-//        if (buffer.len - start < 1024) {
-//            const dest_end = end - start;
-//            @memcpy(buffer[0..dest_end], buffer[start..end]);
-//            end = dest_end;
-//            start = 0;
-//        }
-//        const ask_header = @min(buffer.len - end, 1024 -| (end - start));
-//        end += try reader.readAtLeast(buffer[end..], ask_header);
-//        switch (end - start) {
-//            0 => return archive,
-//            1...511 => return error.UnexpectedEndOfStream,
-//            else => {},
-//        }
-//        const header: std.tar.Header = .{ .bytes = buffer[start..][0..512] };
-//        start += 512;
-//        const file_size = try header.fileSize();
-//        const rounded_file_size = std.mem.alignForward(u64, file_size, 512);
-//        const pad_len = @as(usize, @intCast(rounded_file_size - file_size));
-//        const unstripped_file_name = try header.fullFileName(&file_name_buffer);
-//        switch (header.fileType()) {
-//            .directory => {},
-//            .normal => {
-//                if (file_size == 0 and unstripped_file_name.len == 0) return archive;
-//                const file_name = try strip_components(unstripped_file_name, options.strip_components);
-//
-//                const file_name_copy = try allocator.dupe(u8, file_name);
-//                errdefer allocator.free(file_name_copy);
-//
-//                var file = std.ArrayList(u8).init(allocator);
-//                defer file.deinit();
-//
-//                var file_off: usize = 0;
-//                while (true) {
-//                    if (buffer.len - start < 1024) {
-//                        const dest_end = end - start;
-//                        @memcpy(buffer[0..dest_end], buffer[start..end]);
-//                        end = dest_end;
-//                        start = 0;
-//                    }
-//                    // Ask for the rounded up file size + 512 for the next header.
-//                    // TODO: https://github.com/ziglang/zig/issues/14039
-//                    const ask = @as(usize, @intCast(@min(
-//                        buffer.len - end,
-//                        rounded_file_size + 512 - file_off -| (end - start),
-//                    )));
-//                    end += try reader.readAtLeast(buffer[end..], ask);
-//                    if (end - start < ask) return error.UnexpectedEndOfStream;
-//                    // TODO: https://github.com/ziglang/zig/issues/14039
-//                    const slice = buffer[start..@as(usize, @intCast(@min(file_size - file_off + start, end)))];
-//                    try file.writer().writeAll(slice);
-//                    file_off += slice.len;
-//                    start += slice.len;
-//                    if (file_off >= file_size) {
-//                        start += pad_len;
-//                        // Guaranteed since we use a buffer divisible by 512.
-//                        assert(start <= end);
-//                        const text = try file.toOwnedSlice();
-//                        errdefer allocator.free(text);
-//
-//                        const local_header: *const tar.Header = @ptrCast(header.bytes);
-//                        _ = local_header;
-//                        try archive.files.put(allocator, file_name_copy, .{
-//                            .text = text,
-//                            .mode = 0o644,
-//                            //.mode = try local_header.get_mode(),
-//                        });
-//                        continue :header;
-//                    }
-//                }
-//            },
-//            .global_extended_header, .extended_header => {
-//                if (start + rounded_file_size > end) return error.TarHeadersTooBig;
-//                start = @as(usize, @intCast(start + rounded_file_size));
-//            },
-//            .hard_link => return error.TarUnsupportedFileType,
-//            .symbolic_link => return error.TarUnsupportedFileType,
-//            else => return error.TarUnsupportedFileType,
-//        }
-//    }
-//
-//    return archive;
-//}
+fn path_to_components(allocator: Allocator, path: []const u8) ![]const []const u8 {
+    var list = std.ArrayList([]const u8).init(allocator);
+    defer list.deinit();
+
+    var it = std.mem.tokenizeScalar(u8, path, '/');
+    while (it.next()) |component|
+        try list.append(component);
+
+    return list.toOwnedSlice();
+}
 
 // TODO: thread pool it
 pub fn read_from_fs(
@@ -175,20 +84,16 @@ pub fn read_from_fs(
     errdefer archive.deinit(allocator);
 
     for (paths.keys()) |path| {
-        var components = std.ArrayList([]const u8).init(allocator);
-        defer components.deinit();
-
-        var it = std.mem.tokenizeScalar(u8, path, '/');
-        while (it.next()) |component|
-            try components.append(component);
+        const components = try path_to_components(allocator, path);
+        defer allocator.free(components);
 
         var stack = std.ArrayList(std.fs.Dir).init(allocator);
         defer {
-            for (stack.items) |*subdir| subdir.close();
+            for (stack.items, 0..) |*subdir, i| if (i != 0) subdir.close();
             stack.deinit();
         }
 
-        for (components.items[0 .. components.items.len - 1], 0..) |component, i| {
+        for (components[0 .. components.len - 1], 0..) |component, i| {
             const subdir = if (i == 0) dir else stack.items[stack.items.len - 1];
             var new_dir = try subdir.openDir(component, .{ .iterate = true });
             {
@@ -198,7 +103,7 @@ pub fn read_from_fs(
         }
 
         const subdir = if (stack.items.len == 0) dir else stack.items[stack.items.len - 1];
-        const stat = subdir.statFile(components.items[components.items.len - 1]) catch |err| {
+        const stat = subdir.statFile(components[components.len - 1]) catch |err| {
             if (err == error.FileNotFound) {
                 var buf: [4096]u8 = undefined;
                 const dir_path = try subdir.realpath(".", &buf);
@@ -208,7 +113,7 @@ pub fn read_from_fs(
             return err;
         };
         if (stat.kind == .directory) {
-            var collected_dir = try subdir.openDir(components.items[components.items.len - 1], .{});
+            var collected_dir = try subdir.openDir(components[components.len - 1], .{});
             defer collected_dir.close();
             {
                 var buf: [4096]u8 = undefined;
@@ -220,15 +125,13 @@ pub fn read_from_fs(
             defer walker.deinit();
 
             while (try walker.next()) |entry| {
-                if (entry.kind == .directory)
-                    continue;
-
                 switch (entry.kind) {
+                    .directory => {},
                     .file => {
                         var path_components = std.ArrayList([]const u8).init(allocator);
                         defer path_components.deinit();
 
-                        try path_components.appendSlice(components.items);
+                        try path_components.appendSlice(components);
                         try path_components.append(entry.path);
 
                         const path_copy = try std.fs.path.join(allocator, path_components.items);
