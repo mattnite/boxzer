@@ -374,6 +374,7 @@ fn normalize_path_alloc(arena: Allocator, pkg_path: []const u8) ![]const u8 {
     const normalized = try arena.dupe(u8, pkg_path);
     if (std.fs.path.sep == canonical_sep) return normalized;
     normalize_path(normalized);
+    std.log.debug("normalized path: {s} -> {s}", .{ pkg_path, normalized });
     return normalized;
 }
 
