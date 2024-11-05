@@ -138,11 +138,9 @@ pub fn main() !void {
             const out_path = try std.fmt.allocPrint(allocator, "{s}-{}.tar.gz", .{ manifest.name, manifest.version });
             break :blk try out_dir.createFile(out_path, .{});
         } else blk: {
-            const out_path = try std.fmt.allocPrint(allocator, "{s}-{}/{s}-{}.tar.gz", .{
-                root_manifest.name,
+            const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
                 root_manifest.version,
                 manifest.name,
-                manifest.version,
             });
 
             var dir = try out_dir.makeOpenPath(std.fs.path.dirname(out_path).?, .{});
