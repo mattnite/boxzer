@@ -282,3 +282,7 @@ fn circular_dependency_found_recursive(
     _ = stack.pop();
     return false;
 }
+
+test "all" {
+    _ = Archive;
+}
