@@ -134,20 +134,18 @@ pub fn main() !void {
     defer out_dir.close();
 
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        const file = if (std.mem.eql(u8, path, root_path)) blk: {
-            const out_path = try std.fmt.allocPrint(allocator, "{s}-{}.tar.gz", .{ manifest.name, manifest.version });
-            break :blk try out_dir.createFile(out_path, .{});
-        } else blk: {
-            const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
-                root_manifest.version,
-                manifest.name,
-            });
+        if (std.mem.eql(u8, path, root_path))
+            continue;
 
-            var dir = try out_dir.makeOpenPath(std.fs.path.dirname(out_path).?, .{});
-            defer dir.close();
+        const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
+            root_manifest.version,
+            manifest.name,
+        });
 
-            break :blk try dir.createFile(std.fs.path.basename(out_path), .{});
-        };
+        var dir = try out_dir.makeOpenPath(std.fs.path.dirname(out_path).?, .{});
+        defer dir.close();
+
+        const file = try dir.createFile(std.fs.path.basename(out_path), .{});
         defer file.close();
 
         std.log.debug("archive path: {s}", .{path});
