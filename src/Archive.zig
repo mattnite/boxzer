@@ -173,14 +173,14 @@ pub fn read_from_fs(
                         const file = try entry.dir.openFile(entry.basename, .{});
                         defer file.close();
 
-                        const file_stat = try file.stat();
-                        std.log.debug("adding symlink: {s} -> {s}", .{
-                            path_copy,
-                            link_copy,
-                        });
-
                         const normalized = try normalize_path_alloc(allocator, path_copy);
                         defer allocator.free(normalized);
+
+                        const file_stat = try file.stat();
+                        std.log.debug("adding symlink: {s} -> {s}", .{
+                            normalized,
+                            link_copy,
+                        });
 
                         try archive.files.put(allocator, normalized, .{
                             .mode = file_stat.mode,
@@ -348,6 +348,7 @@ pub fn hash(
     std.mem.sort([]const u8, paths.items, {}, path_less_than);
 
     for (paths.items, hashes.items) |path, *result| {
+        std.log.debug("getting path: {s}", .{path});
         const file = archive.files.get(path).?;
         var hasher = Hash.init(.{});
         std.log.debug("hashing file", .{});
