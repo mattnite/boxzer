@@ -377,8 +377,6 @@ fn normalize_path_alloc(arena: Allocator, pkg_path: []const u8) ![]const u8 {
     if (std.fs.path.sep != canonical_sep)
         std.mem.replaceScalar(u8, normalized, std.fs.path.sep, canonical_sep);
 
-    std.log.err("sep: {s}", .{normalized});
-
     return if (std.mem.startsWith(u8, normalized, "./"))
         normalized[2..]
     else
@@ -393,8 +391,7 @@ test "normalize_path_alloc" {
 
     const allocator = arena.allocator();
 
-    try testing.expectEqualStrings("file", try normalize_path_alloc(allocator, "./file"));
-    try testing.expectEqualStrings("file", try normalize_path_alloc(allocator, ".\\file"));
+    try testing.expectEqualStrings("file", try normalize_path_alloc(allocator, "." ++ std.fs.path.sep_str ++ "file"));
     try testing.expectEqualStrings("src/file", try normalize_path_alloc(allocator, "src/file"));
     try testing.expectEqualStrings("src/file", try normalize_path_alloc(allocator, "./src/file"));
 }
