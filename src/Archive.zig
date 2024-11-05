@@ -135,7 +135,6 @@ pub fn read_from_fs(
                         errdefer allocator.free(path_copy);
 
                         const normalized = try normalize_path_alloc(allocator, path_copy);
-                        defer allocator.free(normalized);
 
                         const file = try entry.dir.openFile(entry.basename, .{});
                         defer file.close();
@@ -174,7 +173,6 @@ pub fn read_from_fs(
                         defer file.close();
 
                         const normalized = try normalize_path_alloc(allocator, path_copy);
-                        defer allocator.free(normalized);
 
                         const file_stat = try file.stat();
                         std.log.debug("adding symlink: {s} -> {s}", .{
@@ -211,8 +209,6 @@ pub fn read_from_fs(
             std.log.debug("adding file directly: {s}", .{path_copy});
 
             const normalized = try normalize_path_alloc(allocator, path_copy);
-            defer allocator.free(normalized);
-
             try archive.files.put(allocator, normalized, .{
                 .mode = file_stat.mode,
                 .kind = .{
