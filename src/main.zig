@@ -90,12 +90,10 @@ pub fn main() !void {
     const root_manifest = manifests.get(root_path).?;
     // calculate urls
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{s}-{}/{s}-{}.tar.gz", .{
+        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{}/{s}.tar.gz", .{
             base_url,
-            root_manifest.name,
             root_manifest.version,
             manifest.name,
-            manifest.version,
         }));
     }
 
