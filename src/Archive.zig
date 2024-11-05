@@ -374,14 +374,14 @@ const canonical_sep = std.fs.path.sep_posix;
 
 fn normalize_path_alloc(arena: Allocator, pkg_path: []const u8) ![]const u8 {
     const normalized = try arena.dupe(u8, pkg_path);
-    if (std.fs.path.sep != canonical_sep)
-        std.mem.replaceScalar(u8, normalized, std.fs.path.sep, canonical_sep);
-
+    if (std.fs.path.sep == canonical_sep) return normalized;
+    normalize_path(normalized);
     return normalized;
-    //return if (std.mem.startsWith(u8, normalized, "./"))
-    //    normalized[2..]
-    //else
-    //    normalized;
+}
+
+fn normalize_path(bytes: []u8) void {
+    assert(std.fs.path.sep != canonical_sep);
+    std.mem.replaceScalar(u8, bytes, std.fs.path.sep, canonical_sep);
 }
 
 const testing = std.testing;
@@ -390,9 +390,9 @@ test "normalize_path_alloc" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    //const allocator = arena.allocator();
+    const allocator = arena.allocator();
 
-    //try testing.expectEqualStrings("file", try normalize_path_alloc(allocator, "." ++ std.fs.path.sep_str ++ "file"));
-    //try testing.expectEqualStrings("src/file", try normalize_path_alloc(allocator, "src/file"));
-    //try testing.expectEqualStrings("src/file", try normalize_path_alloc(allocator, "./src/file"));
+    try testing.expectEqualStrings("./file", try normalize_path_alloc(allocator, "." ++ std.fs.path.sep_str ++ "file"));
+    try testing.expectEqualStrings("src/file", try normalize_path_alloc(allocator, "src/file"));
+    try testing.expectEqualStrings("./src/file", try normalize_path_alloc(allocator, "./src/file"));
 }
