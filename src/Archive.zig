@@ -161,7 +161,7 @@ pub fn read_from_fs(
 
                         var buf: [8000]u8 = undefined;
                         const link_name = try entry.dir.readLink(entry.basename, &buf);
-                        const link_copy = try allocator.dupe(u8, link_name);
+                        const link_copy = try normalize_path_alloc(allocator, link_name);
 
                         const file = try entry.dir.openFile(entry.basename, .{});
                         defer file.close();
