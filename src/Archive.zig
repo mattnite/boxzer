@@ -134,6 +134,9 @@ pub fn read_from_fs(
                         const path_copy = try std.fs.path.join(allocator, path_components.items);
                         errdefer allocator.free(path_copy);
 
+                        const normalized = try normalize_path_alloc(allocator, path_copy);
+                        defer allocator.free(normalized);
+
                         const file = try entry.dir.openFile(entry.basename, .{});
                         defer file.close();
 
@@ -142,7 +145,7 @@ pub fn read_from_fs(
 
                         std.log.debug("adding file: {s}", .{entry.path});
                         const file_stat = try file.stat();
-                        try archive.files.put(allocator, path_copy, .{
+                        try archive.files.put(allocator, normalized, .{
                             .mode = file_stat.mode,
                             .kind = .{
                                 .regular = text,
