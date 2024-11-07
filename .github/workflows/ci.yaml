@@ -40,7 +40,7 @@ jobs:
           sleep 1
 
           cd ../workbench/a
-          zig fetch --save=b http://localhost:8000/monorepo-0.0.0/b-0.0.0.tar.gz
+          zig fetch --save=b http://localhost:8000/0.0.0/b.tar.gz
           zig build
 
           # clean up server
