@@ -183,7 +183,11 @@ pub fn main() !void {
         try metadata.put("minimum_zig_version", .{ .string = minimum_zig_version });
         try metadata.put("packages", .{ .object = packages });
 
-        const file = try out_dir.createFile("metadata.json", .{});
+        const version_path = try std.fmt.allocPrint(allocator, "{}", .{manifest.version});
+        var dir = try out_dir.openDir(version_path, .{});
+        defer dir.close();
+
+        const file = try dir.createFile("metadata.json", .{});
         defer file.close();
 
         const value = json.Value{ .object = metadata };
