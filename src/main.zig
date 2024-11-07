@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const json = std.json;
 
 const Manifest = @import("Manifest.zig");
 const Archive = @import("Archive.zig");
@@ -90,12 +91,10 @@ pub fn main() !void {
     const root_manifest = manifests.get(root_path).?;
     // calculate urls
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{s}-{}/{s}-{}.tar.gz", .{
+        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{}/{s}.tar.gz", .{
             base_url,
-            root_manifest.name,
             root_manifest.version,
             manifest.name,
-            manifest.version,
         }));
     }
 
@@ -135,23 +134,20 @@ pub fn main() !void {
     var out_dir = try std.fs.cwd().makeOpenPath("boxzer-out", .{});
     defer out_dir.close();
 
+    var packages = json.ObjectMap.init(allocator);
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        const file = if (std.mem.eql(u8, path, root_path)) blk: {
-            const out_path = try std.fmt.allocPrint(allocator, "{s}-{}.tar.gz", .{ manifest.name, manifest.version });
-            break :blk try out_dir.createFile(out_path, .{});
-        } else blk: {
-            const out_path = try std.fmt.allocPrint(allocator, "{s}-{}/{s}-{}.tar.gz", .{
-                root_manifest.name,
-                root_manifest.version,
-                manifest.name,
-                manifest.version,
-            });
+        if (std.mem.eql(u8, path, root_path))
+            continue;
 
-            var dir = try out_dir.makeOpenPath(std.fs.path.dirname(out_path).?, .{});
-            defer dir.close();
+        const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
+            root_manifest.version,
+            manifest.name,
+        });
 
-            break :blk try dir.createFile(std.fs.path.basename(out_path), .{});
-        };
+        var dir = try out_dir.makeOpenPath(std.fs.path.dirname(out_path).?, .{});
+        defer dir.close();
+
+        const file = try dir.createFile(std.fs.path.basename(out_path), .{});
         defer file.close();
 
         std.log.debug("archive path: {s}", .{path});
@@ -159,6 +155,39 @@ pub fn main() !void {
         var buffered = std.io.bufferedWriter(file.writer());
         try buffered.writer().writeAll(tar_gz);
         try buffered.flush();
+
+        var deps = json.ObjectMap.init(allocator);
+        for (manifest.dependencies.keys(), manifest.dependencies.values()) |dep_name, info| {
+            var dep = json.ObjectMap.init(allocator);
+            try dep.put("url", .{ .string = info.remote.url });
+            try dep.put("hash", .{ .string = info.remote.hash });
+
+            try deps.put(dep_name, .{ .object = dep });
+        }
+
+        var package = json.ObjectMap.init(allocator);
+        try package.put("dependencies", .{ .object = deps });
+        try package.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{}", .{manifest.version}) });
+        try package.put("url", .{ .string = urls.get(path).? });
+        try package.put("hash", .{ .string = &(hashes.get(path).?) });
+
+        if (manifest.doc.root.object.get("description")) |desc|
+            try package.put("description", .{ .string = desc.string });
+
+        try packages.put(manifest.name, .{ .object = package });
+    }
+
+    if (manifests.get(root_path)) |manifest| {
+        var metadata = json.ObjectMap.init(allocator);
+        try metadata.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{}", .{manifest.version}) });
+        try metadata.put("minimum_zig_version", .{ .string = minimum_zig_version });
+        try metadata.put("packages", .{ .object = packages });
+
+        const file = try out_dir.createFile("metadata.json", .{});
+        defer file.close();
+
+        const value = json.Value{ .object = metadata };
+        try json.stringify(value, .{ .whitespace = .indent_4 }, file.writer());
     }
 }
 
