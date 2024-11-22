@@ -15,10 +15,12 @@ const log = std.log.scoped(.manifest);
 pub const PackageInfo = union(enum) {
     local: struct {
         path: []const u8,
+        lazy: bool,
     },
     remote: struct {
         url: []const u8,
         hash: []const u8,
+        lazy: bool,
     },
 
     pub fn format(
@@ -111,8 +113,16 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
                 const path_copy = try allocator.dupe(u8, path.string);
                 errdefer allocator.free(path_copy);
 
+                const lazy: bool = if (dep.get("lazy")) |lazy_node|
+                    if (lazy_node != .bool)
+                        return error.DependencyLazinessIsNotBool
+                    else
+                        lazy_node.bool
+                else
+                    false;
+
                 try dependencies.put(dep_key_copy, .{
-                    .local = .{ .path = path_copy },
+                    .local = .{ .path = path_copy, .lazy = lazy },
                 });
             } else {
                 const url = dep.get("url") orelse return error.DependencyMissingUrl;
@@ -124,6 +134,14 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
                 if (hash != .string)
                     return error.HashIsNotString;
 
+                const lazy: bool = if (dep.get("lazy")) |lazy_node|
+                    if (lazy_node != .bool)
+                        return error.DependencyLazinessIsNotBool
+                    else
+                        lazy_node.bool
+                else
+                    false;
+
                 const url_copy = try allocator.dupe(u8, url.string);
                 errdefer allocator.free(url_copy);
 
@@ -134,6 +152,7 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
                     .remote = .{
                         .url = url_copy,
                         .hash = hash_copy,
+                        .lazy = lazy,
                     },
                 });
             }
@@ -191,6 +210,7 @@ pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptio
             var new_value = std.StringArrayHashMapUnmanaged(zon.Node){};
             try new_value.put(manifest.allocator, "url", .{ .string = info.remote.url });
             try new_value.put(manifest.allocator, "hash", .{ .string = info.remote.hash });
+            try new_value.put(manifest.allocator, "lazy", .{ .bool = info.remote.lazy });
             try dependencies.object.put(manifest.allocator, dep_name, .{ .object = new_value });
         }
     }
