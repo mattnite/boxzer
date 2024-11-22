@@ -138,6 +138,11 @@ pub fn main() !void {
 
     var packages = json.ObjectMap.init(allocator);
     for (manifests.keys(), manifests.values()) |path, manifest| {
+        if (!manifest.paths.contains("LICENSE")) {
+            std.log.err("{s} does not have a LICENSE file", .{path});
+            return error.NoLicenseFile;
+        }
+
         const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
             root_manifest.version,
             manifest.name,
