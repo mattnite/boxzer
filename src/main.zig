@@ -106,10 +106,12 @@ pub fn main() !void {
                 const local_deps = dependencies.get(path).?;
                 var manifest = manifests.get(path).?;
                 for (local_deps.keys(), local_deps.values()) |dep_name, dep_path| {
+                    const old = manifest.dependencies.get(dep_name).?;
                     try manifest.dependencies.put(dep_name, .{
                         .remote = .{
                             .url = urls.get(dep_path).?,
                             .hash = try std.fmt.allocPrint(allocator, "{s}", .{&hashes.get(dep_path).?}),
+                            .lazy = old.local.lazy,
                         },
                     });
                 }
@@ -136,9 +138,6 @@ pub fn main() !void {
 
     var packages = json.ObjectMap.init(allocator);
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        if (std.mem.eql(u8, path, root_path))
-            continue;
-
         const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
             root_manifest.version,
             manifest.name,
@@ -161,6 +160,7 @@ pub fn main() !void {
             var dep = json.ObjectMap.init(allocator);
             try dep.put("url", .{ .string = info.remote.url });
             try dep.put("hash", .{ .string = info.remote.hash });
+            try dep.put("lazy", .{ .bool = info.remote.lazy });
 
             try deps.put(dep_name, .{ .object = dep });
         }
