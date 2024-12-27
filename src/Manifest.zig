@@ -239,6 +239,14 @@ pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptio
         }
     }
 
+    var paths = std.ArrayList(zon.Node).init(manifest.allocator);
+    defer paths.deinit();
+
+    for (manifest.paths.keys()) |path|
+        try paths.append(.{ .string = path });
+
+    try manifest.doc.root.object.put(manifest.allocator, "paths", .{ .array = try paths.toOwnedSlice() });
+
     try write_zon_node(manifest.doc.root, 0, writer);
     return try buffer.toOwnedSlice();
 }
