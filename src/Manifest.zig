@@ -63,6 +63,26 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
         for (paths.keys()) |path| allocator.free(path);
         paths.deinit();
     }
+    var ignore_paths = std.StringArrayHashMap(void).init(allocator);
+    errdefer {
+        for (ignore_paths.keys()) |path| allocator.free(path);
+        ignore_paths.deinit();
+    }
+
+    if (root.get("boxzer_ignore_paths")) |zon_ignore_paths| {
+        if (zon_ignore_paths != .array)
+            return error.ProjectIgnorePathsIsNotArray;
+
+        for (zon_ignore_paths.array) |ignore_path| {
+            if (ignore_path != .string)
+                return error.ProjectIgnorePathIsNotString;
+
+            const ignore_path_copy = try allocator.dupe(u8, ignore_path.string);
+            errdefer allocator.free(ignore_path_copy);
+
+            try ignore_paths.put(ignore_path_copy, {});
+        }
+    }
 
     const zon_paths = root.get("paths") orelse return error.ProjectMissingPaths;
     if (zon_paths != .array)
@@ -71,6 +91,10 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
     for (zon_paths.array) |path| {
         if (path != .string)
             return error.ProjectPathIsNotString;
+
+        if (ignore_paths.contains(path.string))
+            continue;
+
         const path_copy = try allocator.dupe(u8, path.string);
         errdefer allocator.free(path_copy);
 
