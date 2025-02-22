@@ -32,7 +32,7 @@ pub fn main() !void {
     try todo.put(try std.fs.cwd().realpathAlloc(allocator, "."), {});
     while (todo.count() > 0) {
         // pop entries from todo until it's ones we haven't visited
-        const root_path = while (todo.popOrNull()) |entry| {
+        const root_path = while (todo.pop()) |entry| {
             if (!manifests.contains(entry.key))
                 break entry.key;
         } else continue;
