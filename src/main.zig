@@ -26,7 +26,7 @@ pub fn main() !void {
     const base_url = args[1];
 
     var todo = std.StringArrayHashMap(void).init(allocator);
-    var manifests = std.StringArrayHashMap(Manifest).init(allocator);
+    var manifests = std.StringArrayHashMap(*Manifest).init(allocator);
     var dependencies = std.StringArrayHashMap(std.StringArrayHashMapUnmanaged([]const u8)).init(allocator);
 
     try todo.put(try std.fs.cwd().realpathAlloc(allocator, "."), {});
@@ -41,9 +41,7 @@ pub fn main() !void {
         defer root_dir.close();
 
         const zon_text = try root_dir.readFileAlloc(allocator, "build.zig.zon", 0x4000);
-        const manifest = try Manifest.from_text(allocator, zon_text);
-        try manifests.putNoClobber(root_path, manifest);
-        std.log.debug("created manifest: {s}", .{root_path});
+        const manifest = try Manifest.create_from_text(allocator, zon_text);
 
         const result = try dependencies.getOrPut(root_path);
         std.debug.assert(!result.found_existing);
@@ -64,6 +62,9 @@ pub fn main() !void {
                 },
                 .remote => {},
             };
+
+        try manifests.putNoClobber(root_path, manifest);
+        std.log.debug("created manifest: {s}", .{root_path});
     }
 
     const root_path = try std.fs.cwd().realpathAlloc(allocator, ".");
@@ -162,12 +163,21 @@ pub fn main() !void {
 
         var deps = json.ObjectMap.init(allocator);
         for (manifest.dependencies.keys(), manifest.dependencies.values()) |dep_name, info| {
-            var dep = json.ObjectMap.init(allocator);
-            try dep.put("url", .{ .string = info.remote.url });
-            try dep.put("hash", .{ .string = info.remote.hash });
-            try dep.put("lazy", .{ .bool = info.remote.lazy });
+            switch (info) {
+                .remote => |remote| {
+                    var dep = json.ObjectMap.init(allocator);
+                    try dep.put("url", .{ .string = remote.url });
+                    try dep.put("hash", .{ .string = remote.hash });
+                    try dep.put("lazy", .{ .bool = remote.lazy });
 
-            try deps.put(dep_name, .{ .object = dep });
+                    try deps.put(dep_name, .{ .object = dep });
+                },
+                .local => |local| {
+                    assert(false);
+                    _ = local;
+                    //std.log.debug("local: {s}", .{local.path});
+                },
+            }
         }
 
         var package = json.ObjectMap.init(allocator);

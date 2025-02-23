@@ -39,6 +39,14 @@ pub const PackageInfo = union(enum) {
     }
 };
 
+pub fn create_from_text(allocator: Allocator, text: []const u8) !*Manifest {
+    const manifest = try allocator.create(Manifest);
+    errdefer allocator.destroy(manifest);
+
+    manifest.* = try from_text(allocator, text);
+    return manifest;
+}
+
 pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
     var doc = try zon.parseString(allocator, text);
     errdefer doc.deinit();
