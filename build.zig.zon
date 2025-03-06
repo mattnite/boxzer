@@ -1,10 +1,11 @@
 .{
-    .name = "boxzer",
+    .name = .boxzer,
+    .fingerprint = 0xbef00569148c4050,
     .version = "0.0.0",
     .dependencies = .{
         .eggzon = .{
-            .url = "git+https://github.com/mattnite/eggzon.git#43d6d56d8eb2869c12f928fc54a74de61370babf",
-            .hash = "1220c80c2633155c37e821aad509c72b8799720be7a00374ce4281f1a67bafd97705",
+            .url = "git+https://github.com/Grazfather/eggzon.git#119caf50f2577924cdccdefd2325c272a5870112",
+            .hash = "eggzon-0.1.1-POI_7XqVAAAihGWvHqS-FIspzd0EeTWQAuB6AXijpI2S",
         },
     },
 

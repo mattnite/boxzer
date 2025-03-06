@@ -16,6 +16,11 @@ pub fn main() !void {
     const allocator = arena.allocator();
     const args = try std.process.argsAlloc(allocator);
 
+    if (args.len != 2) {
+        std.log.err("Need to provide argument", .{});
+        return error.BadInvocation;
+    }
+
     if (std.mem.eql(u8, args[1], "get-version")) {
         const zon_text = try std.fs.cwd().readFileAlloc(allocator, "build.zig.zon", 0x4000);
         const manifest = try Manifest.from_text(allocator, zon_text);
