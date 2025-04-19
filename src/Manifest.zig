@@ -1,8 +1,9 @@
 allocator: Allocator,
 name: []const u8,
 version: std.SemanticVersion,
+fingerprint: Fingerprint,
 dependencies: std.StringArrayHashMap(PackageInfo),
-paths: std.StringArrayHashMap(void),
+paths: std.StringArrayHashMap(PathOrigin),
 doc: zon.Document,
 
 const Manifest = @This();
@@ -11,6 +12,16 @@ const Allocator = std.mem.Allocator;
 const zon = @import("eggzon");
 
 const log = std.log.scoped(.manifest);
+
+const Fingerprint = packed struct(u64) {
+    id: u32,
+    checksum: u32,
+};
+
+pub const PathOrigin = union(enum) {
+    in_filesystem,
+    in_memory: []const u8,
+};
 
 pub const PackageInfo = union(enum) {
     local: struct {
@@ -63,10 +74,15 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
     if (version != .string)
         return error.VersionIsNotString;
 
+    const id = root.get("fingerprint") orelse return error.ProjectMissingFingerprint;
+    if (id != .int) {
+        return error.IdIsNotInt;
+    }
+
     const name_copy = try allocator.dupe(u8, name.@"enum");
     const semver = try std.SemanticVersion.parse(version.string);
 
-    var paths = std.StringArrayHashMap(void).init(allocator);
+    var paths = std.StringArrayHashMap(PathOrigin).init(allocator);
     errdefer {
         for (paths.keys()) |path| allocator.free(path);
         paths.deinit();
@@ -106,7 +122,7 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
         const path_copy = try allocator.dupe(u8, path.string);
         errdefer allocator.free(path_copy);
 
-        try paths.put(path_copy, {});
+        try paths.put(path_copy, .in_filesystem);
     }
 
     var dependencies = std.StringArrayHashMap(PackageInfo).init(allocator);
@@ -191,10 +207,12 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
         }
     }
 
+    const fingerprint: u64 = @intCast(id.int);
     return Manifest{
         .allocator = allocator,
         .name = name_copy,
         .version = semver,
+        .fingerprint = @bitCast(fingerprint),
         .dependencies = dependencies,
         .paths = paths,
         .doc = doc,
@@ -289,4 +307,12 @@ fn write_zon_node(node: zon.Node, depth: u32, writer: anytype) WriteZonError!voi
         },
         inline else => |value| try writer.print("{}", .{value}),
     }
+}
+
+pub fn get_file_contents(manifest: *Manifest, arena: Allocator, root_dir: std.fs.Dir, path: []const u8) ![]const u8 {
+    const origin = manifest.paths.get(path) orelse return error.FileNotFound;
+    return switch (origin) {
+        .in_memory => |content| content,
+        .in_filesystem => try root_dir.readFileAlloc(arena, path, 100 * 1024 * 1024),
+    };
 }

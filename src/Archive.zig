@@ -4,10 +4,13 @@ const Archive = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-pub const Hash = std.crypto.hash.sha2.Sha256;
+pub const Algo = std.crypto.hash.sha2.Sha256;
+const Hash = [max_len]u8;
+pub const max_len = 32 + 1 + 32 + 1 + (32 + 32 + 200) / 6;
 
 const builtin = @import("builtin");
 const tar = @import("tar.zig");
+const Manifest = @import("Manifest.zig");
 
 const log = std.log.scoped(.archive);
 
@@ -74,7 +77,7 @@ const Dir = std.fs.Dir;
 pub fn read_from_fs(
     allocator: Allocator,
     root_dir: Dir,
-    paths: std.StringArrayHashMap(void),
+    paths: std.StringArrayHashMap(Manifest.PathOrigin),
 ) !Archive {
     {
         var buf: [4096]u8 = undefined;
@@ -85,136 +88,155 @@ pub fn read_from_fs(
     var archive = Archive{};
     errdefer archive.deinit(allocator);
 
-    for (paths.keys()) |path| {
-        const components = try path_to_components(allocator, path);
-        defer allocator.free(components);
+    for (paths.keys(), paths.values()) |path, origin| {
+        switch (origin) {
+            .in_filesystem => {
+                const components = try path_to_components(allocator, path);
+                defer allocator.free(components);
 
-        const basename = std.fs.path.basename(path);
-        const dir = if (std.fs.path.dirname(path)) |dirname|
-            try root_dir.openDir(dirname, .{})
-        else
-            root_dir;
+                const basename = std.fs.path.basename(path);
+                const dir = if (std.fs.path.dirname(path)) |dirname|
+                    try root_dir.openDir(dirname, .{})
+                else
+                    root_dir;
 
-        const is_dir = blk: {
-            const stat = dir.statFile(basename) catch |err| {
-                if (err == error.IsDir)
-                    break :blk true;
-                var buf: [4096]u8 = undefined;
-                const dir_path = try dir.realpath(".", &buf);
-                std.log.err("Failed to stat file: {s}/{s}, reason: {}", .{ dir_path, path, err });
+                const is_dir = blk: {
+                    const stat = dir.statFile(basename) catch |err| {
+                        if (err == error.IsDir)
+                            break :blk true;
+                        var buf: [4096]u8 = undefined;
+                        const dir_path = try dir.realpath(".", &buf);
+                        std.log.err("Failed to stat file: {s}/{s}, reason: {}", .{ dir_path, path, err });
 
-                return err;
-            };
-            break :blk stat.kind == .directory;
-        };
-        if (is_dir) {
-            var collected_dir = try dir.openDir(basename, .{
-                .iterate = true,
-            });
-            defer collected_dir.close();
-            {
-                var buf: [4096]u8 = undefined;
-                const dir_path = try collected_dir.realpath(".", &buf);
-                std.log.debug("found directory, adding all contents: {s}", .{dir_path});
-            }
+                        return err;
+                    };
+                    break :blk stat.kind == .directory;
+                };
+                if (is_dir) {
+                    var collected_dir = try dir.openDir(basename, .{
+                        .iterate = true,
+                    });
+                    defer collected_dir.close();
+                    {
+                        var buf: [4096]u8 = undefined;
+                        const dir_path = try collected_dir.realpath(".", &buf);
+                        std.log.debug("found directory, adding all contents: {s}", .{dir_path});
+                    }
 
-            var walker = try collected_dir.walk(allocator);
-            defer walker.deinit();
+                    var walker = try collected_dir.walk(allocator);
+                    defer walker.deinit();
 
-            while (try walker.next()) |entry| {
-                switch (entry.kind) {
-                    .directory => {},
-                    .file => {
-                        var path_components = std.ArrayList([]const u8).init(allocator);
-                        defer path_components.deinit();
+                    while (try walker.next()) |entry| {
+                        switch (entry.kind) {
+                            .directory => {},
+                            .file => {
+                                var path_components = std.ArrayList([]const u8).init(allocator);
+                                defer path_components.deinit();
 
-                        try path_components.appendSlice(components);
-                        try path_components.append(entry.path);
+                                try path_components.appendSlice(components);
+                                try path_components.append(entry.path);
 
-                        const path_copy = try std.fs.path.join(allocator, path_components.items);
-                        errdefer allocator.free(path_copy);
+                                const path_copy = try std.fs.path.join(allocator, path_components.items);
+                                errdefer allocator.free(path_copy);
 
-                        const normalized = try normalize_path_alloc(allocator, path_copy);
+                                const normalized = try normalize_path_alloc(allocator, path_copy);
 
-                        const file = try entry.dir.openFile(entry.basename, .{});
-                        defer file.close();
+                                const file = try entry.dir.openFile(entry.basename, .{});
+                                defer file.close();
 
-                        const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-                        errdefer allocator.free(text);
+                                const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+                                errdefer allocator.free(text);
 
-                        std.log.debug("adding file: {s}", .{entry.path});
-                        const file_stat = try file.stat();
-                        try archive.files.put(allocator, normalized, .{
-                            .mode = file_stat.mode,
-                            .kind = .{
-                                .regular = text,
+                                std.log.debug("adding file: {s}", .{entry.path});
+                                const file_stat = try file.stat();
+                                try archive.files.put(allocator, normalized, .{
+                                    .mode = file_stat.mode,
+                                    .kind = .{
+                                        .regular = text,
+                                    },
+                                });
                             },
-                        });
-                    },
-                    .sym_link => {
-                        var path_components = std.ArrayList([]const u8).init(allocator);
-                        defer path_components.deinit();
+                            .sym_link => {
+                                var path_components = std.ArrayList([]const u8).init(allocator);
+                                defer path_components.deinit();
 
-                        try path_components.appendSlice(components);
-                        try path_components.append(entry.path);
+                                try path_components.appendSlice(components);
+                                try path_components.append(entry.path);
 
-                        const path_copy = try std.fs.path.join(allocator, path_components.items);
-                        errdefer allocator.free(path_copy);
+                                const path_copy = try std.fs.path.join(allocator, path_components.items);
+                                errdefer allocator.free(path_copy);
 
-                        var buf: [8000]u8 = undefined;
-                        const link_name = try entry.dir.readLink(entry.basename, &buf);
-                        const link_copy = try allocator.dupe(u8, link_name);
+                                var buf: [8000]u8 = undefined;
+                                const link_name = try entry.dir.readLink(entry.basename, &buf);
+                                const link_copy = try allocator.dupe(u8, link_name);
 
-                        if (std.fs.path.sep != canonical_sep) {
-                            normalize_path(link_copy);
-                        }
+                                if (std.fs.path.sep != canonical_sep) {
+                                    normalize_path(link_copy);
+                                }
 
-                        const file = try entry.dir.openFile(entry.basename, .{});
-                        defer file.close();
+                                const file = try entry.dir.openFile(entry.basename, .{});
+                                defer file.close();
 
-                        const normalized = try normalize_path_alloc(allocator, path_copy);
+                                const normalized = try normalize_path_alloc(allocator, path_copy);
 
-                        const file_stat = try file.stat();
-                        std.log.debug("adding symlink: {s} -> {s}", .{
-                            normalized,
-                            link_copy,
-                        });
+                                const file_stat = try file.stat();
+                                std.log.debug("adding symlink: {s} -> {s}", .{
+                                    normalized,
+                                    link_copy,
+                                });
 
-                        try archive.files.put(allocator, normalized, .{
-                            .mode = file_stat.mode,
-                            .kind = .{
-                                .symlink = link_copy,
+                                try archive.files.put(allocator, normalized, .{
+                                    .mode = file_stat.mode,
+                                    .kind = .{
+                                        .symlink = link_copy,
+                                    },
+                                });
                             },
-                        });
-                    },
-                    else => {
-                        if (entry.kind != .file) {
-                            log.warn("skipping {}: {s}", .{ entry.kind, entry.path });
-                            continue;
+                            else => {
+                                if (entry.kind != .file) {
+                                    log.warn("skipping {}: {s}", .{ entry.kind, entry.path });
+                                    continue;
+                                }
+                            },
                         }
-                    },
+                    }
+                } else {
+                    const file = try dir.openFile(basename, .{});
+                    defer file.close();
+
+                    const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+                    errdefer allocator.free(text);
+
+                    const path_copy = try std.fs.path.join(allocator, components);
+                    errdefer allocator.free(path_copy);
+
+                    const file_stat = try file.stat();
+                    std.log.debug("adding file directly: {s}", .{path_copy});
+
+                    const normalized = try normalize_path_alloc(allocator, path_copy);
+                    try archive.files.put(allocator, normalized, .{
+                        .mode = file_stat.mode,
+                        .kind = .{
+                            .regular = text,
+                        },
+                    });
                 }
-            }
-        } else {
-            const file = try dir.openFile(basename, .{});
-            defer file.close();
+            },
+            .in_memory => |content| {
+                const components = try path_to_components(allocator, path);
+                defer allocator.free(components);
 
-            const text = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-            errdefer allocator.free(text);
+                const path_copy = try std.fs.path.join(allocator, components);
+                errdefer allocator.free(path_copy);
 
-            const path_copy = try std.fs.path.join(allocator, components);
-            errdefer allocator.free(path_copy);
-
-            const file_stat = try file.stat();
-            std.log.debug("adding file directly: {s}", .{path_copy});
-
-            const normalized = try normalize_path_alloc(allocator, path_copy);
-            try archive.files.put(allocator, normalized, .{
-                .mode = file_stat.mode,
-                .kind = .{
-                    .regular = text,
-                },
-            });
+                const normalized = try normalize_path_alloc(allocator, path_copy);
+                try archive.files.put(allocator, normalized, .{
+                    .mode = 0o777,
+                    .kind = .{
+                        .regular = content,
+                    },
+                });
+            },
         }
     }
 
@@ -277,13 +299,13 @@ pub const WhatToDoWithExecutableBit = enum {
     include_executable_bit,
 };
 
-pub const multihash_function: MultihashFunction = switch (Hash) {
+pub const multihash_function: MultihashFunction = switch (Algo) {
     std.crypto.hash.sha2.Sha256 => .@"sha2-256",
     else => @compileError("unreachable"),
 };
 
-pub const Digest = [Hash.digest_length]u8;
-pub const multihash_len = 1 + 1 + Hash.digest_length;
+pub const Digest = [Algo.digest_length]u8;
+pub const multihash_len = 1 + 1 + Algo.digest_length;
 pub const multihash_hex_digest_len = 2 * multihash_len;
 pub const MultiHashHexDigest = [multihash_hex_digest_len]u8;
 const hex_charset = "0123456789abcdef";
@@ -312,8 +334,8 @@ pub fn hex_digest(digest: Digest) MultiHashHexDigest {
     result[0] = hex_charset[@intFromEnum(multihash_function) >> 4];
     result[1] = hex_charset[@intFromEnum(multihash_function) & 15];
 
-    result[2] = hex_charset[Hash.digest_length >> 4];
-    result[3] = hex_charset[Hash.digest_length & 15];
+    result[2] = hex_charset[Algo.digest_length >> 4];
+    result[3] = hex_charset[Algo.digest_length & 15];
 
     for (digest, 0..) |byte, i| {
         result[4 + i * 2] = hex_charset[byte >> 4];
@@ -322,11 +344,42 @@ pub fn hex_digest(digest: Digest) MultiHashHexDigest {
     return result;
 }
 
-// TODO: threadpool this
 pub fn hash(
     archive: Archive,
+    gpa: Allocator,
+    name: []const u8,
+    semver: std.SemanticVersion,
+    id: u32,
+) ![]const u8 {
+    if (name.len > 32)
+        return error.NameTooLong;
+
+    var ver_buf: [32]u8 = undefined;
+    const ver = try std.fmt.bufPrint(&ver_buf, "{}", .{semver});
+
+    const archive_hash = try archive.hash_files(gpa);
+
+    var hashplus: [33]u8 = undefined;
+    std.mem.writeInt(u32, hashplus[0..4], id, .little);
+    std.mem.writeInt(u32, hashplus[4..8], archive_hash.size, .little);
+    hashplus[8..].* = archive_hash.digest[0..25].*;
+
+    var buf: [80]u8 = undefined;
+    const hashplus_str = std.base64.url_safe_no_pad.Encoder.encode(&buf, &hashplus);
+
+    return try std.fmt.allocPrint(gpa, "{s}-{s}-{s}", .{ name, ver, hashplus_str });
+}
+
+const ArchiveHash = struct {
+    digest: Digest,
+    size: u32,
+};
+
+// TODO: threadpool this
+fn hash_files(
+    archive: Archive,
     allocator: Allocator,
-) !MultiHashHexDigest {
+) !ArchiveHash {
     var timer = try std.time.Timer.start();
     defer {
         const timer_result = timer.read();
@@ -336,17 +389,18 @@ pub fn hash(
     var paths = std.ArrayList([]const u8).init(allocator);
     defer paths.deinit();
 
-    var hashes = std.ArrayList([Hash.digest_length]u8).init(allocator);
+    var hashes = std.ArrayList([Algo.digest_length]u8).init(allocator);
     defer hashes.deinit();
 
     try paths.appendSlice(archive.files.keys());
     try hashes.appendNTimes(undefined, paths.items.len);
     std.mem.sort([]const u8, paths.items, {}, path_less_than);
 
+    var size: u32 = 0;
     for (paths.items, hashes.items) |path, *result| {
         std.log.debug("getting path: {s}", .{path});
         const file = archive.files.get(path).?;
-        var hasher = Hash.init(.{});
+        var hasher = Algo.init(.{});
         std.log.debug("hashing file", .{});
         std.log.debug("  <- {}", .{std.fmt.fmtSliceEscapeUpper(path)});
         hasher.update(path);
@@ -358,6 +412,8 @@ pub fn hash(
                 hasher.update(&.{ 0, 0 });
                 std.log.debug("  <- <content>", .{});
                 hasher.update(text);
+
+                size +%= @intCast(text.len);
             },
             .symlink => |symlink| {
                 const link_name = try normalize_path_alloc(allocator, symlink);
@@ -370,7 +426,7 @@ pub fn hash(
     }
 
     std.log.debug("hashing package:", .{});
-    var hasher = Hash.init(.{});
+    var hasher = Algo.init(.{});
     for (paths.items, hashes.items) |file_path, file_hash| {
         std.log.debug("  {s}: {}", .{ file_path, std.fmt.fmtSliceHexUpper(&file_hash) });
         hasher.update(&file_hash);
@@ -378,7 +434,10 @@ pub fn hash(
 
     const result = hex_digest(hasher.finalResult());
     std.log.debug("  RESULT: {s}", .{result});
-    return result;
+    return ArchiveHash{
+        .digest = hasher.finalResult(),
+        .size = size,
+    };
 }
 
 const canonical_sep = std.fs.path.sep_posix;

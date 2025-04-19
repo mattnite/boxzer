@@ -9,17 +9,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const exe = b.addExecutable(.{
-        .name = "boxzer",
+    const boxzer_mod = b.addModule("boxzer", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    b.installArtifact(exe);
+    boxzer_mod.addImport("eggzon", eggzon_dep.module("eggzon"));
 
-    exe.root_module.addImport("eggzon", eggzon_dep.module("eggzon"));
+    const boxzer_exe = b.addExecutable(.{
+        .name = "boxzer",
+        .root_module = boxzer_mod,
+    });
+    b.installArtifact(boxzer_exe);
 
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addRunArtifact(boxzer_exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
