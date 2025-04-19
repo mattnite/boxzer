@@ -6,6 +6,10 @@ const json = std.json;
 const Manifest = @import("Manifest.zig");
 const Archive = @import("Archive.zig");
 
+const BuildZigZon = struct {
+    name: []const u8,
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -16,11 +20,15 @@ pub fn main() !void {
     const allocator = arena.allocator();
     const args = try std.process.argsAlloc(allocator);
 
-    if (std.mem.eql(u8, args[1], "get-version")) {
+    {
         const zon_text = try std.fs.cwd().readFileAlloc(allocator, "build.zig.zon", 0x4000);
-        const manifest = try Manifest.from_text(allocator, zon_text);
-        try std.io.getStdOut().writer().print("{}\n", .{manifest.version});
-        return;
+        const zon_text_copy = try allocator.dupeZ(u8, zon_text);
+
+        if (std.mem.eql(u8, args[1], "get-version")) {
+            const manifest = try Manifest.from_text(allocator, zon_text_copy);
+            try std.io.getStdOut().writer().print("{}\n", .{manifest.version});
+            return;
+        }
     }
 
     const base_url = args[1];
@@ -86,7 +94,7 @@ pub fn main() !void {
     }
 
     var archives = std.StringArrayHashMap(Archive).init(allocator);
-    var hashes = std.StringArrayHashMap(Archive.MultiHashHexDigest).init(allocator);
+    var hashes = std.StringArrayHashMap([]const u8).init(allocator);
     var urls = std.StringArrayHashMap([]const u8).init(allocator);
 
     const root_manifest = manifests.get(root_path).?;
@@ -97,6 +105,13 @@ pub fn main() !void {
             root_manifest.version,
             manifest.name,
         }));
+        if (!manifest.paths.contains("LICENSE")) {
+            // Copy the license file from the root
+            std.log.warn("{s} does not have a LICENSE file, using root LICENSE", .{path});
+            try manifest.paths.put("LICENSE", .{
+                .in_memory = try root_manifest.get_file_contents(arena.allocator(), std.fs.cwd(), "LICENSE"),
+            });
+        }
     }
 
     const minimum_zig_version: []const u8 = try get_minimum_zig_version(allocator);
@@ -111,7 +126,7 @@ pub fn main() !void {
                     try manifest.dependencies.put(dep_name, .{
                         .remote = .{
                             .url = urls.get(dep_path).?,
-                            .hash = try std.fmt.allocPrint(allocator, "{s}", .{&hashes.get(dep_path).?}),
+                            .hash = try std.fmt.allocPrint(allocator, "{s}", .{hashes.get(dep_path).?}),
                             .lazy = old.local.lazy,
                         },
                     });
@@ -127,7 +142,9 @@ pub fn main() !void {
                     }) };
                     std.log.info("generated manifest: {s}", .{file.kind.regular});
                 }
-                try hashes.put(path, try archive.hash(allocator));
+
+                const hash = try archive.hash(arena.allocator(), manifest.name, manifest.version, manifest.fingerprint.id);
+                try hashes.put(path, hash);
                 try archives.put(path, archive);
             }
         }
@@ -139,11 +156,6 @@ pub fn main() !void {
 
     var packages = json.ObjectMap.init(allocator);
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        if (!manifest.paths.contains("LICENSE")) {
-            std.log.err("{s} does not have a LICENSE file", .{path});
-            return error.NoLicenseFile;
-        }
-
         const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
             root_manifest.version,
             manifest.name,
@@ -184,7 +196,7 @@ pub fn main() !void {
         try package.put("dependencies", .{ .object = deps });
         try package.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{}", .{manifest.version}) });
         try package.put("url", .{ .string = urls.get(path).? });
-        try package.put("hash", .{ .string = &(hashes.get(path).?) });
+        try package.put("hash", .{ .string = hashes.get(path).? });
 
         if (manifest.doc.root.object.get("description")) |desc|
             try package.put("description", .{ .string = desc.string });

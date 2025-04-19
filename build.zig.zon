@@ -1,13 +1,13 @@
 .{
-    .name = "boxzer",
+    .name = .boxzer,
     .version = "0.0.0",
+    .fingerprint = 0xbef00569307ee7f9,
     .dependencies = .{
         .eggzon = .{
-            .url = "git+https://github.com/mattnite/eggzon.git#43d6d56d8eb2869c12f928fc54a74de61370babf",
-            .hash = "1220c80c2633155c37e821aad509c72b8799720be7a00374ce4281f1a67bafd97705",
+            .url = "git+https://github.com/mattnite/eggzon#8cdbc00c6037b6b4267e5303be0991a1a166a929",
+            .hash = "eggzon-0.1.1-POI_7XqVAAAihGWvHqS-FIspzd0EeTWQAuB6AXijpI2S",
         },
     },
-
     .paths = .{
         "build.zig",
         "build.zig.zon",
