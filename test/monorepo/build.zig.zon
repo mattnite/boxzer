@@ -1,5 +1,5 @@
 .{
-    .name = "monorepo",
+    .name = .monorepo,
     .version = "0.0.0",
     .dependencies = .{
         .b = .{ .path = "b" },
@@ -7,5 +7,6 @@
     },
     .paths = .{
         "build.zig.zon",
+        "LICENSE",
     },
 }

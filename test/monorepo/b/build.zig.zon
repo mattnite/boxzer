@@ -1,5 +1,6 @@
 .{
-    .name = "b",
+    .name = .b,
+    .fingerprint = 0x71beeff9d0bb9477,
     .version = "0.0.0",
     .dependencies = .{
         .c = .{ .path = "../c" },
@@ -7,6 +8,7 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "LICENSE",
         "src",
     },
 }

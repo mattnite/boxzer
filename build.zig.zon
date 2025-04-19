@@ -1,6 +1,6 @@
 .{
     .name = .boxzer,
-    .version = "0.0.0",
+    .version = "0.1.0",
     .fingerprint = 0xbef00569307ee7f9,
     .dependencies = .{
         .eggzon = .{

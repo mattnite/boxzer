@@ -70,8 +70,6 @@ pub fn from_text(allocator: Allocator, text: []const u8) !Manifest {
     if (name != .@"enum")
         return error.ProjectNameNotEnum;
 
-    std.log.info("name: {s}", .{name.@"enum"});
-
     const version = root.get("version") orelse return error.ProjectMissingVersion;
     if (version != .string)
         return error.VersionIsNotString;

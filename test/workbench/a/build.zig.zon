@@ -1,9 +1,12 @@
 .{
-    .name = "a",
+    .name = .a,
+    .fingerprint = 0xe8b7be4355d6e395,
     .version = "0.0.0",
+    .dependencies = .{},
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "LICENSE",
         "src",
     },
 }
