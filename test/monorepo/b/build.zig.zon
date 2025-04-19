@@ -2,6 +2,7 @@
     .name = .b,
     .fingerprint = 0x71beeff9d0bb9477,
     .version = "0.0.0",
+    .fingerprint = 0x71beeff91f2c2266,
     .dependencies = .{
         .c = .{ .path = "../c" },
     },
