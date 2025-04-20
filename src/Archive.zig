@@ -394,7 +394,7 @@ fn hash_files(
 
     try paths.appendSlice(archive.files.keys());
     try hashes.appendNTimes(undefined, paths.items.len);
-    std.mem.sort([]const u8, paths.items, {}, path_less_than);
+    std.mem.sortUnstable([]const u8, paths.items, {}, path_less_than);
 
     var size: u32 = 0;
     for (paths.items, hashes.items) |path, *result| {
@@ -428,14 +428,14 @@ fn hash_files(
     std.log.debug("hashing package:", .{});
     var hasher = Algo.init(.{});
     for (paths.items, hashes.items) |file_path, file_hash| {
-        std.log.debug("  {s}: {}", .{ file_path, std.fmt.fmtSliceHexUpper(&file_hash) });
+        std.log.debug("  {s}: hash={} size={} total_size={}", .{ file_path, std.fmt.fmtSliceHexUpper(&file_hash), 0, size });
         hasher.update(&file_hash);
     }
 
-    const result = hex_digest(hasher.finalResult());
-    std.log.debug("  RESULT: {s}", .{result});
+    const digest = hasher.finalResult();
+    std.log.debug("  RESULT: {}", .{std.fmt.fmtSliceHexUpper(&digest)});
     return ArchiveHash{
-        .digest = hasher.finalResult(),
+        .digest = digest,
         .size = size,
     };
 }
