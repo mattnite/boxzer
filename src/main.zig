@@ -214,7 +214,7 @@ pub fn main() !void {
         var dir = try out_dir.openDir(version_path, .{});
         defer dir.close();
 
-        const file = try dir.createFile("metadata.json", .{});
+        const file = try dir.createFile("package-metadata.json", .{});
         defer file.close();
 
         const value = json.Value{ .object = metadata };
