@@ -285,7 +285,7 @@ pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
     defer out_buf.deinit();
 
     var compressor = std.compress.flate.Compress.init(&out_buf.writer, in_buf.items, .{ .container = .gzip });
-    try compressor.end();
+    try compressor.endUnflushed();
 
     return out_buf.toOwnedSlice();
 }
