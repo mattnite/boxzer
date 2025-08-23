@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const json = std.json;
 
+const zon = @import("eggzon");
+
 const Manifest = @import("Manifest.zig");
 const Archive = @import("Archive.zig");
 
@@ -249,7 +251,18 @@ fn get_minimum_zig_version(allocator: Allocator) ![]u8 {
     });
     defer env.deinit();
 
-    return allocator.dupe(u8, env.value.version);
+    var doc = try zon.parseString(allocator, result.stdout);
+    defer doc.deinit();
+
+    if (doc.root != .object)
+        return error.RootIsNotObject;
+
+    const root = doc.root.object;
+    const version = root.get("version") orelse return error.MissingZigVersion;
+    if (version != .string)
+        return error.VersionIsNotString;
+
+    return allocator.dupe(u8, version.string);
 }
 
 fn calculate_depths(
