@@ -4,9 +4,8 @@
     .fingerprint = 0xbef00569307ee7f9,
     .dependencies = .{
         .eggzon = .{
-            //.url = "git+https://github.com/mattnite/eggzon#8cdbc00c6037b6b4267e5303be0991a1a166a929",
-            //.hash = "eggzon-0.1.1-POI_7XqVAAAihGWvHqS-FIspzd0EeTWQAuB6AXijpI2S",
-            .path = "../eggzon",
+            .url = "git+https://github.com/mattnite/eggzon#64a5b1ca4bfacc8280761dc7605ad7aedda9ef56",
+            .hash = "eggzon-0.1.1-POI_7X9mAADMUN-veV8sPZPvLND8FCC01iPVVkoOzMxy",
         },
     },
     .paths = .{
