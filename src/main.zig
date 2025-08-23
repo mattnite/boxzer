@@ -246,11 +246,6 @@ fn get_minimum_zig_version(allocator: Allocator) ![]u8 {
     if (result.term != .Exited and result.term.Exited != 0)
         return error.FailedToGetZigVersion;
 
-    var env = try std.json.parseFromSlice(ZigEnv, allocator, result.stdout, .{
-        .ignore_unknown_fields = true,
-    });
-    defer env.deinit();
-
     var doc = try zon.parseString(allocator, result.stdout);
     defer doc.deinit();
 
