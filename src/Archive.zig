@@ -284,8 +284,10 @@ pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
     var out_buf: std.Io.Writer.Allocating = .init(allocator);
     defer out_buf.deinit();
 
-    var compressor = std.compress.flate.Compress.init(&out_buf.writer, in_buf.items, .{ .container = .gzip });
-    try compressor.endUnflushed();
+    var compress_buf: [std.compress.flate.max_window_len]u8 = undefined;
+    var compressor = std.compress.flate.Compress.init(&out_buf.writer, &compress_buf, .{ .container = .gzip });
+    try compressor.writer.writeAll(in_buf.items);
+    try compressor.end();
 
     return out_buf.toOwnedSlice();
 }
