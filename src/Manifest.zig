@@ -36,13 +36,8 @@ pub const PackageInfo = union(enum) {
 
     pub fn format(
         info: PackageInfo,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
+        writer: *std.Io.Writer,
     ) !void {
-        _ = fmt;
-        _ = options;
-
         switch (info) {
             .local => |local| try writer.print("local: path={s}", .{local.path}),
             .remote => |remote| try writer.print("remote: url={s} hash={s}", .{ remote.url, remote.hash }),
@@ -244,8 +239,8 @@ pub const SerializeOptions = struct {
 };
 
 pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptions) ![]const u8 {
-    var buffer = std.ArrayList(u8).init(allocator);
-    const writer = buffer.writer();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
 
     if (!manifest.doc.root.object.contains("minimum_zig_version") and opts.minimum_zig_version != null) {
         try manifest.doc.root.object.put(manifest.allocator, "minimum_zig_version", .{
@@ -265,7 +260,7 @@ pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptio
         }
     }
 
-    var paths = std.ArrayList(zon.Node).init(manifest.allocator);
+    var paths = std.array_list.Managed(zon.Node).init(manifest.allocator);
     defer paths.deinit();
 
     for (manifest.paths.keys()) |path|
@@ -273,12 +268,12 @@ pub fn serialize(manifest: *Manifest, allocator: Allocator, opts: SerializeOptio
 
     try manifest.doc.root.object.put(manifest.allocator, "paths", .{ .array = try paths.toOwnedSlice() });
 
-    try write_zon_node(manifest.doc.root, 0, writer);
-    return try buffer.toOwnedSlice();
+    try write_zon_node(manifest.doc.root, 0, &buf.writer);
+    return try buf.toOwnedSlice();
 }
 
-const WriteZonError = error{OutOfMemory};
-fn write_zon_node(node: zon.Node, depth: u32, writer: anytype) WriteZonError!void {
+const WriteZonError = error{WriteFailed};
+fn write_zon_node(node: zon.Node, depth: u32, writer: *std.Io.Writer) WriteZonError!void {
     switch (node) {
         .null => try writer.writeAll("null"),
         .empty => {},
@@ -287,22 +282,22 @@ fn write_zon_node(node: zon.Node, depth: u32, writer: anytype) WriteZonError!voi
         .array => |arr| {
             try writer.writeAll(".{\n");
             for (arr) |elem| {
-                try writer.writeByteNTimes(' ', 4 * (depth + 1));
+                for (0..(4 * (depth + 1))) |_| try writer.writeByte(' ');
                 try write_zon_node(elem, depth + 1, writer);
                 try writer.writeAll(",\n");
             }
-            try writer.writeByteNTimes(' ', 4 * depth);
+            for (0..(4 * depth)) |_| try writer.writeByte(' ');
             try writer.writeAll("}");
         },
         .object => |obj| {
             try writer.writeAll(".{\n");
             for (obj.keys(), obj.values()) |key, value| {
-                try writer.writeByteNTimes(' ', 4 * (depth + 1));
-                try writer.print(".{} = ", .{std.zig.fmtId(key)});
+                for (0..(4 * (depth + 1))) |_| try writer.writeByte(' ');
+                try writer.print(".{f} = ", .{std.zig.fmtId(key)});
                 try write_zon_node(value, depth + 1, writer);
                 try writer.writeAll(",\n");
             }
-            try writer.writeByteNTimes(' ', 4 * depth);
+            for (0..(4 * depth)) |_| try writer.writeByte(' ');
             try writer.writeAll("}");
         },
         inline else => |value| try writer.print("{}", .{value}),

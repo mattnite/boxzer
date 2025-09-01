@@ -9,6 +9,7 @@ const Hash = [max_len]u8;
 pub const max_len = 32 + 1 + 32 + 1 + (32 + 32 + 200) / 6;
 
 const builtin = @import("builtin");
+const compress = @import("compress");
 const tar = @import("tar.zig");
 const Manifest = @import("Manifest.zig");
 
@@ -61,7 +62,7 @@ const ReadFromTarOptions = struct {
 };
 
 fn path_to_components(allocator: Allocator, path: []const u8) ![]const []const u8 {
-    var list = std.ArrayList([]const u8).init(allocator);
+    var list = std.array_list.Managed([]const u8).init(allocator);
     defer list.deinit();
 
     var it = std.mem.tokenizeScalar(u8, path, '/');
@@ -130,7 +131,7 @@ pub fn read_from_fs(
                         switch (entry.kind) {
                             .directory => {},
                             .file => {
-                                var path_components = std.ArrayList([]const u8).init(allocator);
+                                var path_components = std.array_list.Managed([]const u8).init(allocator);
                                 defer path_components.deinit();
 
                                 try path_components.appendSlice(components);
@@ -157,7 +158,7 @@ pub fn read_from_fs(
                                 });
                             },
                             .sym_link => {
-                                var path_components = std.ArrayList([]const u8).init(allocator);
+                                var path_components = std.array_list.Managed([]const u8).init(allocator);
                                 defer path_components.deinit();
 
                                 try path_components.appendSlice(components);
@@ -244,11 +245,8 @@ pub fn read_from_fs(
 }
 
 pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
-    var in_buf = std.fifo.LinearFifo(u8, .{ .Dynamic = {} }).init(allocator);
-    defer in_buf.deinit();
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
 
     for (archive.files.keys(), archive.files.values()) |path, file| {
         const size = switch (file.kind) {
@@ -270,24 +268,25 @@ pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
             },
         });
 
-        try in_buf.writer().writeAll(header.to_bytes());
+        try buf.writer.writeAll(header.to_bytes());
         switch (file.kind) {
             .regular => |text| {
-                try in_buf.writer().writeAll(text);
-                try in_buf.writer().writeByteNTimes(0, @as(usize, @intCast(padding)));
+                try buf.writer.writeAll(text);
+                try buf.writer.splatBytesAll(&.{0}, @as(usize, @intCast(padding)));
             },
             .symlink => {},
         }
     }
 
-    try in_buf.writer().writeByteNTimes(0, 1024);
+    try buf.writer.splatBytesAll(&.{0}, 1024);
 
-    var out_buf = std.ArrayList(u8).init(allocator);
-    defer out_buf.deinit();
+    var in: std.Io.Reader = .fixed(buf.written());
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
 
-    try std.compress.gzip.compress(in_buf.reader(), out_buf.writer(), .{});
+    try compress.gzip.compress(&in, &out.writer, .{});
 
-    return out_buf.toOwnedSlice();
+    return out.toOwnedSlice();
 }
 
 fn path_less_than(_: void, lhs: []const u8, rhs: []const u8) bool {
@@ -355,7 +354,7 @@ pub fn hash(
         return error.NameTooLong;
 
     var ver_buf: [32]u8 = undefined;
-    const ver = try std.fmt.bufPrint(&ver_buf, "{}", .{semver});
+    const ver = try std.fmt.bufPrint(&ver_buf, "{f}", .{semver});
 
     const archive_hash = try archive.hash_files(gpa);
 
@@ -386,10 +385,10 @@ fn hash_files(
         log.info("hash took {} nanoseconds", .{timer_result});
     }
 
-    var paths = std.ArrayList([]const u8).init(allocator);
+    var paths = std.array_list.Managed([]const u8).init(allocator);
     defer paths.deinit();
 
-    var hashes = std.ArrayList([Algo.digest_length]u8).init(allocator);
+    var hashes = std.array_list.Managed([Algo.digest_length]u8).init(allocator);
     defer hashes.deinit();
 
     try paths.appendSlice(archive.files.keys());
@@ -402,13 +401,13 @@ fn hash_files(
         const file = archive.files.get(path).?;
         var hasher = Algo.init(.{});
         std.log.debug("hashing file", .{});
-        std.log.debug("  <- {}", .{std.fmt.fmtSliceEscapeUpper(path)});
+        std.log.debug("  <- {X}", .{path});
         hasher.update(path);
 
         switch (file.kind) {
             .regular => |text| {
                 // hardcode executable bit to false
-                std.log.debug("  <- {}", .{std.fmt.fmtSliceEscapeUpper(&.{ 0, 0 })});
+                std.log.debug("  <- {X}", .{&.{ 0, 0 }});
                 hasher.update(&.{ 0, 0 });
                 std.log.debug("  <- <content>", .{});
                 hasher.update(text);
@@ -418,22 +417,22 @@ fn hash_files(
             .symlink => |symlink| {
                 const link_name = try normalize_path_alloc(allocator, symlink);
                 hasher.update(link_name);
-                std.log.err("  <- {}", .{std.fmt.fmtSliceEscapeUpper(link_name)});
+                std.log.err("  <- {X}", .{link_name});
             },
         }
         hasher.final(result);
-        std.log.debug("  -> {}", .{std.fmt.fmtSliceEscapeUpper(result)});
+        std.log.debug("  -> {X}", .{result});
     }
 
     std.log.debug("hashing package:", .{});
     var hasher = Algo.init(.{});
     for (paths.items, hashes.items) |file_path, file_hash| {
-        std.log.debug("  {s}: hash={} size={} total_size={}", .{ file_path, std.fmt.fmtSliceHexUpper(&file_hash), 0, size });
+        std.log.debug("  {s}: hash={X} size={} total_size={}", .{ file_path, &file_hash, 0, size });
         hasher.update(&file_hash);
     }
 
     const digest = hasher.finalResult();
-    std.log.debug("  RESULT: {}", .{std.fmt.fmtSliceHexUpper(&digest)});
+    std.log.debug("  RESULT: {X}", .{&digest});
     return ArchiveHash{
         .digest = digest,
         .size = size,

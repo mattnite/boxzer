@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const json = std.json;
 
+const zon = @import("eggzon");
+
 const Manifest = @import("Manifest.zig");
 const Archive = @import("Archive.zig");
 
@@ -26,7 +28,7 @@ pub fn main() !void {
 
         if (std.mem.eql(u8, args[1], "get-version")) {
             const manifest = try Manifest.from_text(allocator, zon_text_copy);
-            try std.io.getStdOut().writer().print("{}\n", .{manifest.version});
+            try std.fs.File.stdout().deprecatedWriter().print("{f}\n", .{manifest.version});
             return;
         }
     }
@@ -100,7 +102,7 @@ pub fn main() !void {
     const root_manifest = manifests.get(root_path).?;
     // calculate urls
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{}/{s}.tar.gz", .{
+        try urls.put(path, try std.fmt.allocPrint(allocator, "{s}/{f}/{s}.tar.gz", .{
             base_url,
             root_manifest.version,
             manifest.name,
@@ -156,7 +158,7 @@ pub fn main() !void {
 
     var packages = json.ObjectMap.init(allocator);
     for (manifests.keys(), manifests.values()) |path, manifest| {
-        const out_path = try std.fmt.allocPrint(allocator, "{}/{s}.tar.gz", .{
+        const out_path = try std.fmt.allocPrint(allocator, "{f}/{s}.tar.gz", .{
             root_manifest.version,
             manifest.name,
         });
@@ -169,9 +171,11 @@ pub fn main() !void {
 
         std.log.debug("archive path: {s}", .{path});
         const tar_gz = try archives.get(path).?.to_tar_gz(allocator);
-        var buffered = std.io.bufferedWriter(file.writer());
-        try buffered.writer().writeAll(tar_gz);
-        try buffered.flush();
+
+        var buf: [4096]u8 = undefined;
+        var writer = file.writer(&buf);
+        try writer.interface.writeAll(tar_gz);
+        try writer.interface.flush();
 
         var deps = json.ObjectMap.init(allocator);
         for (manifest.dependencies.keys(), manifest.dependencies.values()) |dep_name, info| {
@@ -194,7 +198,7 @@ pub fn main() !void {
 
         var package = json.ObjectMap.init(allocator);
         try package.put("dependencies", .{ .object = deps });
-        try package.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{}", .{manifest.version}) });
+        try package.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{f}", .{manifest.version}) });
         try package.put("url", .{ .string = urls.get(path).? });
         try package.put("hash", .{ .string = hashes.get(path).? });
 
@@ -206,19 +210,22 @@ pub fn main() !void {
 
     if (manifests.get(root_path)) |manifest| {
         var metadata = json.ObjectMap.init(allocator);
-        try metadata.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{}", .{manifest.version}) });
+        try metadata.put("version", .{ .string = try std.fmt.allocPrint(allocator, "{f}", .{manifest.version}) });
         try metadata.put("minimum_zig_version", .{ .string = minimum_zig_version });
         try metadata.put("packages", .{ .object = packages });
 
-        const version_path = try std.fmt.allocPrint(allocator, "{}", .{manifest.version});
+        const version_path = try std.fmt.allocPrint(allocator, "{f}", .{manifest.version});
         var dir = try out_dir.openDir(version_path, .{});
         defer dir.close();
 
         const file = try dir.createFile("package-metadata.json", .{});
         defer file.close();
 
+        var buf: [4096]u8 = undefined;
+        var writer = file.writer(&buf);
+
         const value = json.Value{ .object = metadata };
-        try json.stringify(value, .{ .whitespace = .indent_4 }, file.writer());
+        try json.Stringify.value(value, .{ .whitespace = .indent_4 }, &writer.interface);
     }
 }
 
@@ -239,12 +246,18 @@ fn get_minimum_zig_version(allocator: Allocator) ![]u8 {
     if (result.term != .Exited and result.term.Exited != 0)
         return error.FailedToGetZigVersion;
 
-    var env = try std.json.parseFromSlice(ZigEnv, allocator, result.stdout, .{
-        .ignore_unknown_fields = true,
-    });
-    defer env.deinit();
+    var doc = try zon.parseString(allocator, result.stdout);
+    defer doc.deinit();
 
-    return allocator.dupe(u8, env.value.version);
+    if (doc.root != .object)
+        return error.RootIsNotObject;
+
+    const root = doc.root.object;
+    const version = root.get("version") orelse return error.MissingZigVersion;
+    if (version != .string)
+        return error.VersionIsNotString;
+
+    return allocator.dupe(u8, version.string);
 }
 
 fn calculate_depths(
@@ -310,8 +323,8 @@ fn circular_dependency_found(
     allocator: Allocator,
     root_path: []const u8,
     dependencies: std.StringArrayHashMap(std.StringArrayHashMapUnmanaged([]const u8)),
-) !std.ArrayList([]const u8) {
-    var stack = std.ArrayList([]const u8).init(allocator);
+) !std.array_list.Managed([]const u8) {
+    var stack = std.array_list.Managed([]const u8).init(allocator);
     errdefer stack.deinit();
 
     _ = try circular_dependency_found_recursive(root_path, &stack, dependencies);
@@ -321,7 +334,7 @@ fn circular_dependency_found(
 
 fn circular_dependency_found_recursive(
     path: []const u8,
-    stack: *std.ArrayList([]const u8),
+    stack: *std.array_list.Managed([]const u8),
     dependencies: std.StringArrayHashMap(std.StringArrayHashMapUnmanaged([]const u8)),
 ) !bool {
     for (stack.items) |elem| {
