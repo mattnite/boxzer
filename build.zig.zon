@@ -8,8 +8,8 @@
             .hash = "eggzon-0.1.1-POI_7X9mAADMUN-veV8sPZPvLND8FCC01iPVVkoOzMxy",
         },
         .compress = .{
-            .url = "git+https://github.com/mattnite/compress#f0d4934e9d9f8ac2a5f197649edc5831280e3b53",
-            .hash = "compress-0.0.1-X7ykI7ZXDgCqWDZg-6Ej0SE0ujgv6YPbOTSd5pJ574be",
+            .url = "git+https://github.com/mattnite/compress#dd0e5ee98895543fa36a6c85a7327473d5993bab",
+            .hash = "compress-0.0.1-X7ykI9taDgDBg67m5S2rXFmwHAryuq8OPHjdXtDVF59I",
         },
     },
     .paths = .{
