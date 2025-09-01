@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const b_dep = b.dependency("b", .{});
     const exe = b.addExecutable(.{
         .name = "a",
-        .root_source_file = b.createModule(.{
+        .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
         }),
         .target = target,
