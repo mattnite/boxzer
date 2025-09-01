@@ -9,10 +9,21 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const compress_dep = b.dependency("compress", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const boxzer_mod = b.addModule("boxzer", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{
+                .name = "compress",
+                .module = compress_dep.module("compress"),
+            },
+        },
     });
     boxzer_mod.addImport("eggzon", eggzon_dep.module("eggzon"));
 

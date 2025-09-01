@@ -9,6 +9,7 @@ const Hash = [max_len]u8;
 pub const max_len = 32 + 1 + 32 + 1 + (32 + 32 + 200) / 6;
 
 const builtin = @import("builtin");
+const compress = @import("compress");
 const tar = @import("tar.zig");
 const Manifest = @import("Manifest.zig");
 
@@ -244,11 +245,8 @@ pub fn read_from_fs(
 }
 
 pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
-    var in_buf = std.array_list.Managed(u8).init(allocator);
-    defer in_buf.deinit();
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
 
     for (archive.files.keys(), archive.files.values()) |path, file| {
         const size = switch (file.kind) {
@@ -270,25 +268,25 @@ pub fn to_tar_gz(archive: Archive, allocator: Allocator) ![]u8 {
             },
         });
 
-        try in_buf.writer().writeAll(header.to_bytes());
+        try buf.writer.writeAll(header.to_bytes());
         switch (file.kind) {
             .regular => |text| {
-                try in_buf.writer().writeAll(text);
-                try in_buf.writer().writeByteNTimes(0, @as(usize, @intCast(padding)));
+                try buf.writer.writeAll(text);
+                try buf.writer.splatBytesAll(&.{0}, @as(usize, @intCast(padding)));
             },
             .symlink => {},
         }
     }
 
-    try in_buf.writer().writeByteNTimes(0, 1024);
-    var out_buf: std.Io.Writer.Allocating = .init(allocator);
-    defer out_buf.deinit();
+    try buf.writer.splatBytesAll(&.{0}, 1024);
 
-    var compress_buf: [std.compress.flate.max_window_len]u8 = undefined;
-    var compressor = std.compress.flate.Compress.init(&out_buf.writer, &compress_buf, .{ .container = .gzip });
-    try compressor.writer.writeAll(in_buf.items);
+    var in: std.Io.Reader = .fixed(buf.written());
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
 
-    return out_buf.toOwnedSlice();
+    try compress.gzip.compress(&in, &out.writer, .{});
+
+    return out.toOwnedSlice();
 }
 
 fn path_less_than(_: void, lhs: []const u8, rhs: []const u8) bool {
